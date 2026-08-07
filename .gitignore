@@ -1,0 +1,4 @@
+/.catkin_tools/
+/.vscode/
+*.pyc
+__pycache__/
