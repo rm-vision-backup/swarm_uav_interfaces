@@ -1,0 +1,14 @@
+string protocol_version
+string operation
+string mission_id
+string session_epoch
+uint64 lease_seq
+float32 ttl_s
+string uav_id
+string exec_target
+string reason
+---
+bool accepted
+string state
+string error_code
+string message

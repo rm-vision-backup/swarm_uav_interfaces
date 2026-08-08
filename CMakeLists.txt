@@ -9,6 +9,7 @@ add_message_files(
   FILES
   Pose3DYaw.msg
   TaskAssignment.msg
+  UavLinkHealth.msg
   UavTaskState.msg
 )
 
@@ -16,6 +17,7 @@ add_service_files(
   FILES
   UavTask.srv
   UavHold.srv
+  UavSafetyLease.srv
 )
 
 generate_messages()

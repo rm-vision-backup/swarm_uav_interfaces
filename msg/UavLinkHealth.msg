@@ -1,0 +1,10 @@
+string protocol_version
+string uav_id
+string exec_target
+string state
+bool connected
+float64 age_s
+string mission_id
+string session_epoch
+string reason
+float64 reported_at
