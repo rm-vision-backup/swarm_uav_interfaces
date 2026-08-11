@@ -3,3 +3,4 @@ bool formation_follow
 string target_id
 swarm_uav_interfaces/Pose3DYaw target_pose
 swarm_uav_interfaces/Pose3DYaw[] waypoints
+swarm_uav_interfaces/Pose3DYaw formation_offset
