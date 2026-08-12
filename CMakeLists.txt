@@ -20,6 +20,7 @@ add_service_files(
   UavTask.srv
   UavHold.srv
   UavSafetyLease.srv
+  UavTaskControl.srv
 )
 
 generate_messages(

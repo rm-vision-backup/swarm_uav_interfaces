@@ -18,6 +18,7 @@ Group A 地面站与单机执行器共同依赖的纯 ROS `msg/srv` 契约包。
 - `UavTaskState.msg`：机载接受与终态反馈。
 - `UavLinkHealth.msg`：GCS_A 发布的逐机端到端链路健康事件与快照；状态为 `DISCOVERED`、`HEALTHY`、`SUSPECT`、`LOST`、`RECOVERED`。
 - `UavTask.srv`：非阻塞单机任务接收入口。
+- `UavTaskControl.srv`：对已登记任务执行 `START` 或 `ABORT`；用于整组启动屏障，不直接暴露给 TCP 上游。
 - `UavHold.srv`：本机 HOLD 安全入口。
 - `UavSafetyLease.srv`：GCS_A 对机载安全看门狗执行 `START`、`RENEW`、`END` 的单一租约入口。
 
