@@ -20,16 +20,13 @@ Group A 地面站与单机执行器共同依赖的纯 ROS `msg/srv` 契约包。
 - `UavTask.srv`：非阻塞单机任务接收入口。
 - `UavTaskControl.srv`：对已登记任务执行 `START` 或 `ABORT`；用于整组启动屏障，不直接暴露给 TCP 上游。
 - `UavHold.srv`：本机 HOLD 安全入口。
-- `UavSafetyLease.srv`：GCS_A 对机载安全看门狗执行 `START`、`RENEW`、`END` 的单一租约入口。
+- `UavSafetyLease.srv`：已废弃（dead definition）。原为 GCS_A 对机载安全看门狗执行 `START`、`RENEW`、`END` 的租约入口；safety-lease 机制按 implementation_plan_26081406 移除，运行时不启动该服务，保留 .srv 定义仅为兼容旧构建与历史消息。
 
-## 飞行安全租约
+## 飞行安全租约（已移除）
 
-- 飞行会话由 `mission_id + session_epoch` 唯一标识，`session_epoch` 使用字符串 UUID。
-- 同一 epoch 内 `lease_seq` 严格递增；完全相同的 START/RENEW 重试保持幂等。
-- 旧 epoch、倒退序号以及相同序号但内容不同的请求必须拒绝，避免迟到请求错误续命。
-- 合法 RENEW 一经机载接收即完成续期；响应链路丢失不得回滚已应用的租约。
-- 租约过期后的 HOLD 为锁存安全状态，恢复通信不代表恢复旧任务。
-- 所有参与节点必须同步升级本接口包；不得单独修改已部署接口的字段顺序或类型。
+- safety-lease 层（机载 watchdog 与 GCS 协调器）已按 `implementation_plan_26081406.md` 整体移除。
+- 断链安全改由 GCS_A 的 `link_health` 监测与 `safe_hold` 承担；机载 HOLD 服务保留为本机安全停止入口。
+- 下方历史约束不再适用：`mission_id + session_epoch`、`lease_seq` 单调、幂等重试、过期锁存等均为旧机制语义。
 
 首版机载执行只支持 `MOVE_TO` 和 `HOLD`。`formation_follow`、`target_id` 与 `waypoints` 为后续能力保留，不代表首版已实现。
 
@@ -43,7 +40,7 @@ rosmsg show swarm_uav_interfaces/UavTaskState
 rosmsg show swarm_uav_interfaces/UavLinkHealth
 rossrv show swarm_uav_interfaces/UavTask
 rossrv show swarm_uav_interfaces/UavHold
-rossrv show swarm_uav_interfaces/UavSafetyLease
+rossrv show swarm_uav_interfaces/UavSafetyLease  # dead definition, no longer served
 ```
 
 工作空间只使用 `catkin build`。不要直接修改 `build/`、`devel/` 或 `logs/`。
