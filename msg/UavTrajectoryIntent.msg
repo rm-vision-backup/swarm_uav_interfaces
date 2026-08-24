@@ -1,4 +1,9 @@
 string protocol_version
+uint8 PHASE_UNKNOWN=0
+uint8 PHASE_TENTATIVE=1
+uint8 PHASE_ACTIVE=2
+uint8 PHASE_BRAKING=3
+uint8 phase                       # protocol 1.0 is always interpreted as ACTIVE
 string uav_id
 string exec_target
 string frame_id
