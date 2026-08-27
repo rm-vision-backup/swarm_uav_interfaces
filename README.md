@@ -28,7 +28,8 @@ Group A 地面站与单机执行器共同依赖的纯 ROS `msg/srv` 契约包。
 - 断链安全改由 GCS_A 的 `link_health` 监测与 `safe_hold` 承担；机载 HOLD 服务保留为本机安全停止入口。
 - 下方历史约束不再适用：`mission_id + session_epoch`、`lease_seq` 单调、幂等重试、过期锁存等均为旧机制语义。
 
-首版机载执行只支持 `MOVE_TO` 和 `HOLD`。`formation_follow`、`target_id` 与 `waypoints` 为后续能力保留，不代表首版已实现。
+机载执行支持 `MOVE_TO`、`FOLLOW_ROUTE`（leader EGO / follower PI+编队偏置）、`FAULT_EXIT` 与
+`HOVER`；`formation_follow`、`target_id` 与 `waypoints` 语义见 `swarm_uav_executor/README.md`。
 
 ## 构建与检查
 
