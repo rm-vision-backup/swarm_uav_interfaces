@@ -94,6 +94,7 @@ mkdir -p "$ROS_LOG_DIR"
 | `tcp_to_ros/config/uav_identity_map.yaml` | `A01..A16 → UAV1..UAV16`，`hostname`、`ip` 与现场一致（A16 为备用机） |
 | `tcp_to_ros/config/calibration_defaults.yaml` | `calibration_uavs`（默认 UAV1–UAV6，参与原点/航向冻结）、`all_uavs`（默认 UAV1–UAV16，仅确认记账） |
 | `swarm_topology_bridge/config/topology.yaml` | `GCS_A` + `UAV1..UAV16` 物理 IP；所有节点 `port_offset: 0`；`base_port: 4200`、`service_base_port: 14000`；生产 topic/service 与接收矩阵 |
+| 机载 MAVROS launch（`/opt/ros/noetic/share/mavros/launch/px4.launch`，现场 `px4_multi.launch`） | 现场按机配置 `fcu_url`、`tgt_system`（实测 UAV6：`udp://:15500@`、`6`）；本工作区机载入口 `uav_offboard_ego_real.launch` **不传**这两个参数 |
 | 防火墙 | 放行 `4200–4211`（每机 topic）、`14000`（service）、GCS_A `39001`（对上位机） |
 
 启动校验（失败即拒绝启动，fail-closed）：
@@ -113,7 +114,7 @@ mkdir -p "$ROS_LOG_DIR"
 sudo cp ~/catkin_swarm6-2/src/swarm_uav_executor/services/swarm-uav-onboard.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable swarm-uav-onboard.service
-# 现场核对 unit 内 SWARM_FCU_URL（默认 serial:///dev/ttyACM0:921600）
+# FCU 连接无需传参：现场已在 MAVROS launch 中配置 fcu_url / tgt_system
 sudo systemctl start swarm-uav-onboard.service
 systemctl status swarm-uav-onboard.service
 ```
@@ -121,13 +122,14 @@ systemctl status swarm-uav-onboard.service
 手动/调试等价方式：
 
 ```bash
-roslaunch swarm_uav_executor uav_offboard_ego_real.launch \
-  fcu_url:=serial:///dev/ttyACM0:921600        # 或 udp://:14540@<fcu-ip>:14557
+roslaunch swarm_uav_executor uav_offboard_ego_real.launch   # 不传 fcu_url
 ```
 
 - `uav_name` 默认取本机 `hostname`（= `UAVn`），无需显式传入；
 - `topology_config` 默认加载生产 `swarm_topology_bridge/config/topology.yaml`；
 - `diagnostic_log_dir` 默认 `~/catkin_swarm6-2/runtime_logs/ego_planner`；
+- **不传 `fcu_url` / `tgt_system`**：实机 FCU 链路以机载机 MAVROS launch 的现场配置为准（见 §4），
+  本入口不再要求也不允许覆盖；
 - **该入口不 arm、不 OFFBOARD、不起飞、不发送任务 START**（实机由遥控器操作）。
 
 ### 5.2 GCS_A 地面站
@@ -197,7 +199,7 @@ roslaunch tcp_to_ros gcs_a_real.launch
 | 标定长期不 ready | `calibration_uavs` 成员未在线 / 已 armed / 采样不足 / 航向 > 30° | 查 `gcs_a_calibration` 逐机 ready 日志；确认计算集合成员全在线且 disarm、数据连续 2s |
 | GCS_A `rosservice list` 无 `/UAVn/uav_task` | 该机 bridge/executor 未起；ZMQ 端口被占 | 检查该机进程；确认 `14000`、`4200–4211` 未被旧进程占用；核对防火墙 |
 | `39001` 无监听 / 连接被拒 | tcp_server 未起，或残留进程占用 | `ss -ltnp \| grep 39001`；清理残留后重启 GCS_A 入口 |
-| MAVROS 未 `connected` | `fcu_url` 错误 / 串口权限 / 波特率 | 核对 `fcu_url`；`ls -l /dev/ttyACM*`；用户加入 `dialout` 组 |
+| MAVROS 未 `connected` | 机载 MAVROS launch 的 `fcu_url` / `tgt_system` 与实际链路不符；串口权限 / 波特率 | 核对机载 MAVROS launch（`px4.launch`、现场 `px4_multi.launch`）的 `fcu_url`、`tgt_system` 与飞控一致；`ls -l /dev/ttyACM*`；用户加入 `dialout` 组 |
 | 整组 FAILURE 且机载有 `MIN_DISTANCE_BREACH` | 真实安全事件（物理接近 → 组级 BRAKE_HOLD） | 属被测行为：保留机载 rosout/ulog 证据，整体收口后重来 |
 | 上电顺序相关（后开机的机拿不到原点） | 正常：原点持续广播，机车自动重读 | 等其 ready 日志确认；不阻塞已 ready 机 |
 
@@ -220,7 +222,7 @@ python3 references/runtime/task_test.py --backend tcp --group A --task prepare \
 # —— 机载（每台，hostname=UAVn）——
 sudo systemctl start|stop|status|enable|disable swarm-uav-onboard.service
 # 或手动调试
-roslaunch swarm_uav_executor uav_offboard_ego_real.launch fcu_url:=serial:///dev/ttyACM0:921600
+roslaunch swarm_uav_executor uav_offboard_ego_real.launch   # 不传 fcu_url：现场配在 MAVROS launch
 rosnode list
 rostopic echo -n1 /mavros/state
 
