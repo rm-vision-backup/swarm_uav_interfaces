@@ -2,6 +2,9 @@
 
 Group A 地面站与单机执行器共同依赖的纯 ROS `msg/srv` 契约包。本包不包含业务节点、桥接逻辑或飞控控制权。
 
+> 实机部署与运行说明（机器/包清单、地址端口、构建、配置冻结、启动、运行流程、故障排查）见
+> [`real_setup.md`](real_setup.md)。
+
 ## 契约
 
 - 唯一任务键：`(mission_id, command_id, uav_id)`。
