@@ -48,6 +48,10 @@
    - **部署/编译前先核对板钟**：机载电脑无 RTC 备份时会停在 `1970-01-01`（实测 UAV7：
      `Thu 01 Jan 1970 10:44 CST`、`date +%s ≈ 9.8e3`），须按 §3.2 第 1 步用本机时间对时；
      否则 git 检出与构建产物时间戳全错、ROS 日志无法与飞控 ulog 对齐。
+   - **对时不跨重启**：对时成功后一旦重启/断电，板钟又回 `1970-01-01`（实测 UAV7：18:46 对时成功、19:00 重启后
+     又回到 `Thu 01 Jan 1970 10:57 CST`，`timedatectl` 显示 `System clock synchronized: no`）。
+     **每次上电/重启后都要重做对时**（见 §5.1.1 第 0 步）；未对时的轮次里 ROS 日志时间戳为 1970 基，
+     只能靠飞控 ulog 的 `LOG_ENTRY.time_utc`（GPS UTC）反推真实时刻（见 §8）。
 5. 飞控侧（现场设置，不属于本工作区代码）：
    - 无 RC 触发的意外保护按现场策略配置；`arm/OFFBOARD` 由遥控器执行。
    - 参数：`COM_RCL_EXCEPT=4`、`NAV_RCL_ACT=0`（与仿真一致的无 RC 策略，现场按实际 RC 情况复核）。
@@ -105,6 +109,7 @@ source devel/setup.bash
 | 项 | 实测值 |
 |---|---|
 | 板钟（部署前） | `Thu 01 Jan 1970 10:44 CST`（`date +%s = 9854`）→ 按本机 epoch 对时后 `2026-09-13 18:46:59 CST` |
+| 板钟（重启后） | 同日 ~19:00 重启 → 又回 `Thu 01 Jan 1970 10:57 CST`（`timedatectl`：`System clock synchronized: no`）：**对时不跨重启**，见 §2 第 4 条 |
 | gitea 可达性 | `ub20tglh.local → 192.168.5.241`（机载 mDNS 可解析）；`http://ub20tglh.local:3000/` 返回 `200` |
 | clone（HTTP 匿名） | `swarm_uav_interfaces 9997cd2`、`swarm_topology_bridge 9ee6f58`、`swarm_uav_executor 6f83823`、`ego_planner_driver 42bf262` |
 | 工具链 | `/opt/ros/noetic`、`/usr/bin/catkin`（catkin_tools）、git 2.25.1、`python3` 可 `import zmq/yaml/rospkg` |
@@ -170,6 +175,10 @@ systemctl status swarm-uav-onboard.service
 ```bash
 cd ~/catkin_swarm6-2
 
+# 0) 核对板钟（重启后必做）：date +%s 应为 ~1.79e9；若为 ~9.8e3 则仍在 1970
+date +%s
+#    仍在 1970 → 按 §3.2 第 1 步对时（须在启动栈之前；否则本轮所有 ROS 日志时间戳不可用）
+
 # 1) source ROS 与工作空间
 source /opt/ros/noetic/setup.bash
 source devel/setup.bash
@@ -181,6 +190,8 @@ mkdir -p "$ROS_LOG_DIR" "$HOME/catkin_swarm6-2/.tmp/logs"
 ```
 
 - 换终端要重做；systemd 方式免（unit 内已设 `SWARM_WS` / `ROS_HOME` / `ROS_LOG_DIR` 并 source）。
+- **板钟**：机载重启后回 1970（§2 第 4 条），本步骤只核对（`date +%s`），对时按 §3.2 第 1 步；
+  未对时不影响功能，但本轮 ROS 日志无法与飞控 ulog 直接对齐（§8）。
 
 #### 5.1.2 终端输出留痕
 
@@ -202,6 +213,8 @@ roslaunch swarm_uav_executor uav_offboard_ego_real.launch 2>&1 \
   | tee -a "$HOME/catkin_swarm6-2/.tmp/logs/${UAV}_offboard_ego.log"
 ```
 
+- `${UAV}` 必须在**同一终端先执行** `UAV=$(cat /etc/hostname)`；漏执行会得到名为 `_offboard_ego.log` 的日志
+  （实测 UAV7：机上文件名即 `_offboard_ego.log`），归档时易误判归属。
 - 各类日志落盘位置见 §8；重跑前先归档旧文件，不覆盖证据。
 
 ### 5.2 GCS_A 地面站
@@ -259,7 +272,14 @@ roslaunch tcp_to_ros gcs_a_real.launch
 | 机载 ROS 日志 | `~/catkin_swarm6-2/.ros_home/log/<session>/`（rosout、各节点日志） |
 | planner 诊断 | `~/catkin_swarm6-2/runtime_logs/ego_planner/UAVn-ego-planner.log` |
 | GCS_A 日志 | `~/catkin_swarm6-2/.ros_home/log/<session>/`（bridge/backend/calibration/tcp_server） |
+| 终端全量转录（§5.1.2 方式 B） | `~/catkin_swarm6-2/.tmp/logs/${UAV}_offboard_ego.log`（漏设 `UAV` 时为 `_offboard_ego.log`） |
+| 现场 MAVROS launch 输出 | 机载 `~/.tmp/px4_multi.log`（`px4_multi.launch`，非本工作区入口） |
+| **飞控 PX4 ulog**（时间基准 = GPS UTC） | MAVLink `LOG_REQUEST_LIST` / `LOG_REQUEST_DATA`（经机载 mavlink-routerd 转发的 `udp://:15500`）；归档示例 `~/Downloads/flight_logs/UAV7_2026-09-13_1900/px4_ulogs/log_58..64.ulg` |
 | 任务结果 JSON | `task_test.py` 输出（含 `status`/`failed_robot_ids`/`ticks`） |
+
+- 归档一轮测试时**同时拉飞控 ulog**：ROS 侧板钟未对时时（§2 第 4 条）日志为 1970 基，
+  只有 ulog 的 `LOG_ENTRY.time_utc`（GPS UTC）能锚定真实时刻（实测 UAV7：ROS `arm+OFFBOARD detected`
+  ↔ `log_64` 起始 `19:02:20`）。
 
 多轮验收的留档命名见 `src/tcp_to_ros/test_records/README.md` §8（`.ros_home_round<n>_<s|f>`）。
 
@@ -274,6 +294,8 @@ roslaunch tcp_to_ros gcs_a_real.launch
 | MAVROS 未 `connected` | 机载 MAVROS launch 的 `fcu_url` / `tgt_system` 与实际链路不符；串口权限 / 波特率 | 核对机载 MAVROS launch（`px4.launch`、现场 `px4_multi.launch`）的 `fcu_url`、`tgt_system` 与飞控一致；`ls -l /dev/ttyACM*`；用户加入 `dialout` 组 |
 | 整组 FAILURE 且机载有 `MIN_DISTANCE_BREACH` | 真实安全事件（物理接近 → 组级 BRAKE_HOLD） | 属被测行为：保留机载 rosout/ulog 证据，整体收口后重来 |
 | 上电顺序相关（后开机的机拿不到原点） | 正常：原点持续广播，机车自动重读 | 等其 ready 日志确认；不阻塞已 ready 机 |
+| ROS 日志时间戳为 `1970-01-01`（与飞控时间差 ~56 年） | 板钟未对时：上电/重启后回到 1970（§2 第 4 条） | 按 §3.2 第 1 步对时后重跑；已产生的证据用飞控 ulog `LOG_ENTRY.time_utc`（GPS UTC）对齐（§8） |
+| bridge 报 `dealer connected to UAVn service router` 但该机未上电 | ZMQ `connect` 惰性，不代表对端在线 | 以 `rosservice list`/`rostopic` 实际连通性判断，勿以该行判定在线 |
 
 ## 10. 与 runtime / 上位机联调
 
