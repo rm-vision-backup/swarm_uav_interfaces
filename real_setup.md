@@ -50,7 +50,7 @@
      否则 git 检出与构建产物时间戳全错、ROS 日志无法与飞控 ulog 对齐。
    - **只改系统时钟不跨重启**：实测 UAV7 18:46 修正成功、19:00 重启后又回 `Thu 01 Jan 1970 10:57 CST`
      （`timedatectl`：`System clock synchronized: no`）——当时只改了系统时钟、**没有写入 RTC**。
-     用 `src/tcp_to_ros/tools/real/clock_fix.sh` 修时会同时 `hwclock --systohc` 写 RTC；
+     用 `src/tcp_to_ros/tools/onboard_clock_fix.sh` 修时会同时 `hwclock --systohc` 写 RTC；
      若输出 `WARN(no RTC device …)`（该板无可用 RTC）则**每次上电/重启后仍要重做**（见 §5.1.1 第 0 步）。
      未修正的轮次里 ROS 日志时间戳为 1970 基，只能靠飞控 ulog 的 `LOG_ENTRY.time_utc`（GPS UTC）反推真实时刻（见 §8）。
 5. 飞控侧（现场设置，不属于本工作区代码）：
@@ -103,10 +103,10 @@ source devel/setup.bash
 ```
 
 - gitea 域名不可解析时改用 IP：`http://192.168.5.241:3000/ub20tg/<仓库名>.git`。
-- 时钟修正脚本（等价第 1 步，可一次修多台）：`src/tcp_to_ros/tools/real/clock_fix.sh 1 2 4 11 16`
+- 时钟修正脚本（等价第 1 步，可一次修多台）：`src/tcp_to_ros/tools/onboard_clock_fix.sh 1 2 4 11 16`
   （裸数字 = UAVn；本机取 epoch → 远端 `sudo date -s` → 远端 `hwclock --systohc` 写 RTC → 回读复核）。
-  凭据从参数文件读：`src/tcp_to_ros/tools/configs/clock_sync.env`（机载账号/密码全机相同，
-  **首次 `cp clock_sync.env.example clock_sync.env` 并填好**；含明文密码已 gitignore，勿提交/勿 push）。
+  凭据从参数文件读：`src/tcp_to_ros/tools/configs/onboard.env`（机载账号/密码全机相同，
+  **首次 `cp onboard.env.example onboard.env` 并填好**；含明文密码已 gitignore，勿提交/勿 push）。
   工具说明见 `src/tcp_to_ros/tools/README.md` §4。
 - 校验（可选，**不需要**启动 roscore）：`rospack find swarm_uav_interfaces swarm_topology_bridge swarm_uav_executor ego_planner_driver`、
   `rosmsg show swarm_uav_interfaces/UavTaskState`、`ls devel/lib/`。
@@ -186,8 +186,8 @@ cd ~/catkin_swarm6-2
 # 0) 核对板钟（重启后必做）：date +%s 应为 ~1.79e9；若为 ~9.8e3 则仍在 1970
 date +%s
 #    仍在 1970 → 按 §3.2 第 1 步做时钟修正（须在启动栈之前；否则本轮所有 ROS 日志时间戳不可用）
-#    时钟修正脚本（在本机/地面站跑，可一次多台）：src/tcp_to_ros/tools/real/clock_fix.sh 1 2 4 11 16
-#    也可只修本台：src/tcp_to_ros/tools/real/clock_fix.sh $(hostname | tr -dc 0-9)
+#    时钟修正脚本（在本机/地面站跑，可一次多台）：src/tcp_to_ros/tools/onboard_clock_fix.sh 1 2 4 11 16
+#    也可只修本台：src/tcp_to_ros/tools/onboard_clock_fix.sh $(hostname | tr -dc 0-9)
 
 # 1) source ROS 与工作空间
 source /opt/ros/noetic/setup.bash
@@ -286,15 +286,15 @@ roslaunch tcp_to_ros gcs_a_real.launch
 | 现场 MAVROS launch 输出 | 机载 `~/.tmp/px4_multi.log`（历史 `px4_multi.launch` 的旁路日志，只用于回溯旧轮次；当前机载入口 `uav_offboard_ego_real.launch` 不产生该文件，也不在采集范围） |
 | **飞控 PX4 ulog**（时间基准 = GPS UTC） | MAVLink `LOG_REQUEST_LIST` / `LOG_REQUEST_DATA`（经机载 mavlink-routerd 转发的 `udp://:15500`）；归档示例 `~/Downloads/flight_logs/UAV7_2026-09-13_1900/px4_ulogs/log_58..64.ulg` |
 | 任务结果 JSON | `task_test.py` 输出（含 `status`/`failed_robot_ids`/`ticks`） |
-| 日志下载与取证工具 | `src/tcp_to_ros/tools/`：`logs/fetch_logs.sh`（日志下载：飞控 ulog + 机载 ROS 会话日志 + planner 诊断 + 终端转录，落到 `UAVn_<时间>/`）、`fcu/`（ulog 列表/下载、只读 nsh）、`ulog/`（离线分析）、`real/clock_fix.sh`（时钟修正）；用法与踩坑见其 `README.md` |
+| 日志下载与取证工具 | `src/tcp_to_ros/tools/`（平铺 + 前缀命名，除 `configs/` 无子目录）：`log_fetch.sh`（日志下载总入口：飞控 ulog + 机载 ROS 会话日志 + planner 诊断 + 终端转录，落到 `UAVn_<时间>/`）、`fcu_ulog_list.py` / `fcu_ulog_fetch.py`（MAVLink 直连飞控列/下 ulog）、`fcu_nsh.py`（只读 nsh 取证，独立于下载链）、`ulog_zcheck.py` / `ulog_cmds.py`（离线读 `.ulg`）、`onboard_clock_fix.sh`（时钟修正）；用法与踩坑见其 `README.md` |
 
 - 归档一轮测试时**同时拉飞控 ulog**：ROS 侧板钟未修正时（§2 第 4 条）日志为 1970 基，
   只有 ulog 的 `LOG_ENTRY.time_utc`（GPS UTC）能锚定真实时刻（实测 UAV7：ROS `arm+OFFBOARD detected`
-  ↔ `log_64` 起始 `19:02:20`）。一轮取件用 `src/tcp_to_ros/tools/logs/fetch_logs.sh <UAVn>`（同时收
+  ↔ `log_64` 起始 `19:02:20`）。一轮取件用 `src/tcp_to_ros/tools/log_fetch.sh <UAVn>`（同时收
   机载 ROS/终端日志，落到 `$LOG_OUT/UAVn_<时间>/`，含 `manifest.txt`/`md5sums.txt`；见 `tools/README.md` §2）。
-- 时钟修正：`src/tcp_to_ros/tools/real/clock_fix.sh 1 2 4 11 16`（裸数字 = UAVn；本机取 epoch →
+- 时钟修正：`src/tcp_to_ros/tools/onboard_clock_fix.sh 1 2 4 11 16`（裸数字 = UAVn；本机取 epoch →
   远端 `sudo date -s` → 远端 `hwclock --systohc` 写 RTC → 回读复核，|Δ| ≤ 2 s 判 PASS；
-  凭据在 `tools/configs/clock_sync.env`）；**须在启动栈之前**执行（§3.2 第 1 步、§5.1.1 第 0 步）。
+  凭据在 `tools/configs/onboard.env`）；**须在启动栈之前**执行（§3.2 第 1 步、§5.1.1 第 0 步）。
 
 多轮验收的留档命名见 `src/tcp_to_ros/test_records/README.md` §8（`.ros_home_round<n>_<s|f>`）。
 
