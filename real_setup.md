@@ -119,11 +119,7 @@ sudo systemctl start swarm-uav-onboard.service
 systemctl status swarm-uav-onboard.service
 ```
 
-手动/调试等价方式：
-
-```bash
-roslaunch swarm_uav_executor uav_offboard_ego_real.launch   # 不传 fcu_url
-```
+手动/调试等价方式见 §5.1.1、§5.1.2（先备环境、留终端输出）。
 
 - `uav_name` 默认取本机 `hostname`（= `UAVn`），无需显式传入；
 - `topology_config` 默认加载生产 `swarm_topology_bridge/config/topology.yaml`；
@@ -131,6 +127,45 @@ roslaunch swarm_uav_executor uav_offboard_ego_real.launch   # 不传 fcu_url
 - **不传 `fcu_url` / `tgt_system`**：实机 FCU 链路以机载机 MAVROS launch 的现场配置为准（见 §4），
   本入口不再要求也不允许覆盖；
 - **该入口不 arm、不 OFFBOARD、不起飞、不发送任务 START**（实机由遥控器操作）。
+
+#### 5.1.1 启动前环境准备（手动方式，每个终端都要做）
+
+```bash
+cd ~/catkin_swarm6-2
+
+# 1) source ROS 与工作空间
+source /opt/ros/noetic/setup.bash
+source devel/setup.bash
+
+# 2) ROS 运行数据落工作区（不落 ~/.ros，不用 /tmp）
+export ROS_HOME=$HOME/catkin_swarm6-2/.ros_home
+export ROS_LOG_DIR=$HOME/catkin_swarm6-2/.ros_home/log
+mkdir -p "$ROS_LOG_DIR" "$HOME/catkin_swarm6-2/.tmp/logs"
+```
+
+- 换终端要重做；systemd 方式免（unit 内已设 `SWARM_WS` / `ROS_HOME` / `ROS_LOG_DIR` 并 source）。
+
+#### 5.1.2 终端输出留痕
+
+```bash
+UAV=$(cat /etc/hostname)     # = UAVn，同时用作日志名
+
+# —— 方式 A：systemd（推荐）—— 输出进 journal
+sudo systemctl start swarm-uav-onboard.service
+journalctl -u swarm-uav-onboard.service -f
+# 留档：journalctl -u swarm-uav-onboard.service -b --no-pager \
+#        > ~/catkin_swarm6-2/.tmp/logs/${UAV}_onboard_journal.log
+
+# —— 方式 B：手动/调试 —— 整段终端输出留档（pty 全量转录，-e 透传退出码）
+script -q -e -f -c "roslaunch swarm_uav_executor uav_offboard_ego_real.launch" \
+  "$HOME/catkin_swarm6-2/.tmp/logs/${UAV}_offboard_ego.log"
+
+# 等价写法（无 pty，适合被脚本调用）：
+roslaunch swarm_uav_executor uav_offboard_ego_real.launch 2>&1 \
+  | tee -a "$HOME/catkin_swarm6-2/.tmp/logs/${UAV}_offboard_ego.log"
+```
+
+- 各类日志落盘位置见 §8；重跑前先归档旧文件，不覆盖证据。
 
 ### 5.2 GCS_A 地面站
 
