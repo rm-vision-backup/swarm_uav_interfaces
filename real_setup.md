@@ -225,6 +225,9 @@ roslaunch swarm_uav_executor uav_offboard_ego_real.launch 2>&1 \
 
 - `${UAV}` 必须在**同一终端先执行** `UAV=$(cat /etc/hostname)`；漏执行会得到名为 `_offboard_ego.log` 的日志
   （实测 UAV7：机上文件名即 `_offboard_ego.log`），归档时易误判归属。
+- 方式 B 的手工步骤已脚本化（在机载电脑上执行）：`src/swarm_uav_executor/bashs/start_onboard.sh`
+  （含 §5.1.1 环境准备 + `script` 全量转录，转录名自动取 `hostname`），停止用
+  `bashs/stop_onboard.sh`；见 `src/swarm_uav_executor/bashs/README.md`。
 - 各类日志落盘位置见 §8；重跑前先归档旧文件，不覆盖证据。
 
 ### 5.2 GCS_A 地面站
