@@ -286,11 +286,12 @@ roslaunch tcp_to_ros gcs_a_real.launch
 | 现场 MAVROS launch 输出 | 机载 `~/.tmp/px4_multi.log`（`px4_multi.launch`，非本工作区入口） |
 | **飞控 PX4 ulog**（时间基准 = GPS UTC） | MAVLink `LOG_REQUEST_LIST` / `LOG_REQUEST_DATA`（经机载 mavlink-routerd 转发的 `udp://:15500`）；归档示例 `~/Downloads/flight_logs/UAV7_2026-09-13_1900/px4_ulogs/log_58..64.ulg` |
 | 任务结果 JSON | `task_test.py` 输出（含 `status`/`failed_robot_ids`/`ticks`） |
-| 取件与取证工具 | `src/tcp_to_ros/tools/`：`fcu/`（ulog 列表/下载、只读 nsh）、`ulog/`（离线分析）、`real/clock_fix.sh`（时钟修正）；用法与踩坑见其 `README.md` |
+| 日志下载与取证工具 | `src/tcp_to_ros/tools/`：`logs/fetch_logs.sh`（日志下载：飞控 ulog + 机载 ROS 会话日志 + planner 诊断 + 终端转录，落到 `UAVn_<时间>/`）、`fcu/`（ulog 列表/下载、只读 nsh）、`ulog/`（离线分析）、`real/clock_fix.sh`（时钟修正）；用法与踩坑见其 `README.md` |
 
 - 归档一轮测试时**同时拉飞控 ulog**：ROS 侧板钟未修正时（§2 第 4 条）日志为 1970 基，
   只有 ulog 的 `LOG_ENTRY.time_utc`（GPS UTC）能锚定真实时刻（实测 UAV7：ROS `arm+OFFBOARD detected`
-  ↔ `log_64` 起始 `19:02:20`）。
+  ↔ `log_64` 起始 `19:02:20`）。一轮取件用 `src/tcp_to_ros/tools/logs/fetch_logs.sh <UAVn>`（同时收
+  机载 ROS/终端日志，落到 `$LOG_OUT/UAVn_<时间>/`，含 `manifest.txt`/`md5sums.txt`；见 `tools/README.md` §2）。
 - 时钟修正：`src/tcp_to_ros/tools/real/clock_fix.sh 1 2 4 11 16`（裸数字 = UAVn；本机取 epoch →
   远端 `sudo date -s` → 远端 `hwclock --systohc` 写 RTC → 回读复核，|Δ| ≤ 2 s 判 PASS；
   凭据在 `tools/configs/clock_sync.env`）；**须在启动栈之前**执行（§3.2 第 1 步、§5.1.1 第 0 步）。
@@ -351,7 +352,7 @@ ps -ef | grep -E '[m]avros|[b]ridge_node|[u]av_executor|[e]go_planner|[t]cp_serv
 - `src/swarm_topology_bridge/README.md`：生产 topology、实机 bridge 入口、端口。
 - `src/swarm_uav_executor/README.md`、`services/README.md`：机载实机入口与 systemd 自启。
 - `src/tcp_to_ros/plans/implementation_plan_26091101.md`：本部署适配计划。
-- `src/tcp_to_ros/tools/README.md`：实机运维工具（飞控 ulog 取件/分析、时钟修正）与踩坑记录。
+- `src/tcp_to_ros/tools/README.md`：实机运维工具（日志下载/分析、时钟修正）与踩坑记录。
 - `src/tcp_to_ros/test_records/test_record_26091103.md`、`test_record_26091114.md`：实施与 5 轮回归证据。
 
 
