@@ -43,8 +43,11 @@
 3. 主机名（**部署环境条件，已实机验证**）：
    - 每台机载电脑 `hostname` 固定为 `UAVn`（如 `UAV3`），GCS_A 主机 `hostname=GCS_A`。
    - bridge 用 hostname 判定本机身份；无法唯一匹配 `config/topology.yaml` 节点时启动失败。
-4. 网络：所有机器同一网段可互通；建议 NTP/时钟同步（机间 intent 时间戳依赖 GPS bias 修正，
+4. 网络与时钟：所有机器同一网段可互通；建议 NTP/时钟同步（机间 intent 时间戳依赖 GPS bias 修正，
    但系统时钟漂移仍会影响日志对齐）。
+   - **部署/编译前先核对板钟**：机载电脑无 RTC 备份时会停在 `1970-01-01`（实测 UAV7：
+     `Thu 01 Jan 1970 10:44 CST`、`date +%s ≈ 9.8e3`），须按 §3.2 第 1 步用本机时间对时；
+     否则 git 检出与构建产物时间戳全错、ROS 日志无法与飞控 ulog 对齐。
 5. 飞控侧（现场设置，不属于本工作区代码）：
    - 无 RC 触发的意外保护按现场策略配置；`arm/OFFBOARD` 由遥控器执行。
    - 参数：`COM_RCL_EXCEPT=4`、`NAV_RCL_ACT=0`（与仿真一致的无 RC 策略，现场按实际 RC 情况复核）。
@@ -60,20 +63,54 @@
 | 每台机载电脑 | `swarm_uav_interfaces`、`swarm_topology_bridge`、`swarm_uav_executor`、`ego_planner_driver`、MAVROS |
 
 > `swarm_simulation` 仅仿真使用，实机不部署，也不启动任何 Gazebo/PX4 SITL。
+> 仓库来源：局域网 gitea `http://ub20tglh.local:3000/ub20tg/<仓库名>.git`；**包名 = 仓库名**，
+> HTTP 匿名可读（无需凭据/公钥）。
+> MAVROS 不属于本工作区源码（apt 预装，见 §2.2），本节只处理机载 4 仓 / 地面站 3 仓。
 
 ### 3.2 获取与构建（每台机器）
 
 ```bash
-mkdir -p ~/catkin_swarm6-2/src && cd ~/catkin_swarm6-2
-# 将对应仓库放入 src/（机载 4 包 + 地面站 3 包）
+# —— 1) 对时：板钟回 1970 时必做（须 sudo；先在本机取 epoch）——
+#    本机：date +%s  → 例如 1789296419
+#    机载：date +%s  ≈ 9.8e3（1970-01-01）即为需对时的情形
+echo <机载 sudo 密码> | sudo -S date -s "@<本机 epoch>"
+date     # 复核：应与本机同秒
+
+# —— 2) 建工作区 + 克隆对应仓库（机载 4 仓 / 地面站 3 仓）——
+mkdir -p ~/catkin_swarm6-2/src && cd ~/catkin_swarm6-2/src
+# 机载：
+for r in swarm_uav_interfaces swarm_topology_bridge swarm_uav_executor ego_planner_driver; do
+  git clone http://ub20tglh.local:3000/ub20tg/$r.git
+done
+# 地面站：for r in swarm_uav_interfaces swarm_topology_bridge tcp_to_ros; do ...; done
+
+# —— 3) 构建（日志留档；本步骤不启动任何节点）——
+cd ~/catkin_swarm6-2
 source /opt/ros/noetic/setup.bash
-catkin build
+mkdir -p .tmp/logs && catkin init
+# 机载：
+catkin build swarm_uav_interfaces swarm_topology_bridge swarm_uav_executor ego_planner_driver \
+  2>&1 | tee .tmp/logs/$(hostname)_catkin_build.log
+# 地面站：catkin build swarm_uav_interfaces swarm_topology_bridge tcp_to_ros 2>&1 | tee ...
 source devel/setup.bash
 ```
 
-- 地面站：`catkin build swarm_uav_interfaces swarm_topology_bridge tcp_to_ros`
-- 机载：`catkin build swarm_uav_interfaces swarm_topology_bridge swarm_uav_executor ego_planner_driver`
-- 校验（可选）：`rostopic list`、`rosmsg show swarm_uav_interfaces/UavTaskState`
+- gitea 域名不可解析时改用 IP：`http://192.168.5.241:3000/ub20tg/<仓库名>.git`。
+- 校验（可选，**不需要**启动 roscore）：`rospack find swarm_uav_interfaces swarm_topology_bridge swarm_uav_executor ego_planner_driver`、
+  `rosmsg show swarm_uav_interfaces/UavTaskState`、`ls devel/lib/`。
+- 本节只做「建目录 + clone + 编译」，**不装 systemd、不启任何节点/launch**（启动见 §5）。
+
+#### 3.2.1 实测记录（UAV7 机载，2026-09-13）
+
+| 项 | 实测值 |
+|---|---|
+| 板钟（部署前） | `Thu 01 Jan 1970 10:44 CST`（`date +%s = 9854`）→ 按本机 epoch 对时后 `2026-09-13 18:46:59 CST` |
+| gitea 可达性 | `ub20tglh.local → 192.168.5.241`（机载 mDNS 可解析）；`http://ub20tglh.local:3000/` 返回 `200` |
+| clone（HTTP 匿名） | `swarm_uav_interfaces 9997cd2`、`swarm_topology_bridge 9ee6f58`、`swarm_uav_executor 6f83823`、`ego_planner_driver 42bf262` |
+| 工具链 | `/opt/ros/noetic`、`/usr/bin/catkin`（catkin_tools）、git 2.25.1、`python3` 可 `import zmq/yaml/rospkg` |
+| 构建结果 | `catkin build ...` → `Summary: All 5 packages succeeded!`（Runtime 1 min 2.6 s；`ego_planner_driver` 53.8 s） |
+| 产物校验 | `rospack find` 4 包指向 `~/catkin_swarm6-2/src/*`；`devel/lib/libego_planner_core.so`、`devel/lib/libego_planner_driver_node_lib.so`、`devel/lib/swarm_uav_executor/` |
+| 编译日志 | 机载 `~/catkin_swarm6-2/.tmp/logs/UAV7_catkin_build.log`；归档 `~/catkin_swarm6-2/.tmp/notes/uav7_260913/uav7_catkin_build_260913.log` |
 
 ### 3.3 环境变量（每台机器）
 
