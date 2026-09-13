@@ -123,7 +123,7 @@ source devel/setup.bash
 | 工具链 | `/opt/ros/noetic`、`/usr/bin/catkin`（catkin_tools）、git 2.25.1、`python3` 可 `import zmq/yaml/rospkg` |
 | 构建结果 | `catkin build ...` → `Summary: All 5 packages succeeded!`（Runtime 1 min 2.6 s；`ego_planner_driver` 53.8 s） |
 | 产物校验 | `rospack find` 4 包指向 `~/catkin_swarm6-2/src/*`；`devel/lib/libego_planner_core.so`、`devel/lib/libego_planner_driver_node_lib.so`、`devel/lib/swarm_uav_executor/` |
-| 编译日志 | 机载 `~/catkin_swarm6-2/.tmp/logs/UAV7_catkin_build.log`；归档 `~/catkin_swarm6-2/.tmp/notes/uav7_260913/uav7_catkin_build_260913.log` |
+| 编译日志 | 机载 `~/catkin_swarm6-2/.tmp/logs/UAV7_catkin_build.log`；归档 `~/catkin_swarm6-2/.tmp/archive_260913/uav7_260913/uav7_catkin_build_260913.log` |
 
 ### 3.3 环境变量（每台机器）
 
@@ -283,7 +283,7 @@ roslaunch tcp_to_ros gcs_a_real.launch
 | planner 诊断 | `~/catkin_swarm6-2/runtime_logs/ego_planner/UAVn-ego-planner.log` |
 | GCS_A 日志 | `~/catkin_swarm6-2/.ros_home/log/<session>/`（bridge/backend/calibration/tcp_server） |
 | 终端全量转录（§5.1.2 方式 B） | `~/catkin_swarm6-2/.tmp/logs/${UAV}_offboard_ego.log`（漏设 `UAV` 时为 `_offboard_ego.log`） |
-| 现场 MAVROS launch 输出 | 机载 `~/.tmp/px4_multi.log`（`px4_multi.launch`，非本工作区入口） |
+| 现场 MAVROS launch 输出 | 机载 `~/.tmp/px4_multi.log`（历史 `px4_multi.launch` 的旁路日志，只用于回溯旧轮次；当前机载入口 `uav_offboard_ego_real.launch` 不产生该文件，也不在采集范围） |
 | **飞控 PX4 ulog**（时间基准 = GPS UTC） | MAVLink `LOG_REQUEST_LIST` / `LOG_REQUEST_DATA`（经机载 mavlink-routerd 转发的 `udp://:15500`）；归档示例 `~/Downloads/flight_logs/UAV7_2026-09-13_1900/px4_ulogs/log_58..64.ulg` |
 | 任务结果 JSON | `task_test.py` 输出（含 `status`/`failed_robot_ids`/`ticks`） |
 | 日志下载与取证工具 | `src/tcp_to_ros/tools/`：`logs/fetch_logs.sh`（日志下载：飞控 ulog + 机载 ROS 会话日志 + planner 诊断 + 终端转录，落到 `UAVn_<时间>/`）、`fcu/`（ulog 列表/下载、只读 nsh）、`ulog/`（离线分析）、`real/clock_fix.sh`（时钟修正）；用法与踩坑见其 `README.md` |
