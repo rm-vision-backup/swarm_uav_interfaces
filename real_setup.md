@@ -100,6 +100,8 @@ source devel/setup.bash
 ```
 
 - gitea 域名不可解析时改用 IP：`http://192.168.5.241:3000/ub20tg/<仓库名>.git`。
+- 对时可用脚本（等价第 1 步）：`src/tcp_to_ros/tools/real/board_time_sync.sh -u <user> UAV7`
+  （本机取 epoch → 远端 `sudo date -s` → 回读复核；工具说明见 `src/tcp_to_ros/tools/README.md`）。
 - 校验（可选，**不需要**启动 roscore）：`rospack find swarm_uav_interfaces swarm_topology_bridge swarm_uav_executor ego_planner_driver`、
   `rosmsg show swarm_uav_interfaces/UavTaskState`、`ls devel/lib/`。
 - 本节只做「建目录 + clone + 编译」，**不装 systemd、不启任何节点/launch**（启动见 §5）。
@@ -178,6 +180,7 @@ cd ~/catkin_swarm6-2
 # 0) 核对板钟（重启后必做）：date +%s 应为 ~1.79e9；若为 ~9.8e3 则仍在 1970
 date +%s
 #    仍在 1970 → 按 §3.2 第 1 步对时（须在启动栈之前；否则本轮所有 ROS 日志时间戳不可用）
+#    对时脚本（在本机/地面站跑）：src/tcp_to_ros/tools/real/board_time_sync.sh -u <user> $(cat /etc/hostname)
 
 # 1) source ROS 与工作空间
 source /opt/ros/noetic/setup.bash
@@ -276,10 +279,13 @@ roslaunch tcp_to_ros gcs_a_real.launch
 | 现场 MAVROS launch 输出 | 机载 `~/.tmp/px4_multi.log`（`px4_multi.launch`，非本工作区入口） |
 | **飞控 PX4 ulog**（时间基准 = GPS UTC） | MAVLink `LOG_REQUEST_LIST` / `LOG_REQUEST_DATA`（经机载 mavlink-routerd 转发的 `udp://:15500`）；归档示例 `~/Downloads/flight_logs/UAV7_2026-09-13_1900/px4_ulogs/log_58..64.ulg` |
 | 任务结果 JSON | `task_test.py` 输出（含 `status`/`failed_robot_ids`/`ticks`） |
+| 取件与取证工具 | `src/tcp_to_ros/tools/`：`fcu/`（ulog 列表/下载、只读 nsh）、`ulog/`（离线分析）、`real/board_time_sync.sh`（板钟对时）；用法与踩坑见其 `README.md` |
 
 - 归档一轮测试时**同时拉飞控 ulog**：ROS 侧板钟未对时时（§2 第 4 条）日志为 1970 基，
   只有 ulog 的 `LOG_ENTRY.time_utc`（GPS UTC）能锚定真实时刻（实测 UAV7：ROS `arm+OFFBOARD detected`
   ↔ `log_64` 起始 `19:02:20`）。
+- 板钟对时：`src/tcp_to_ros/tools/real/board_time_sync.sh -u <user> UAV7 …`（本机取 epoch → 远端
+  `sudo date -s` → 回读复核，|Δ| ≤ 2 s 判 PASS）；**须在启动栈之前**执行（§3.2 第 1 步、§5.1.1 第 0 步）。
 
 多轮验收的留档命名见 `src/tcp_to_ros/test_records/README.md` §8（`.ros_home_round<n>_<s|f>`）。
 
@@ -337,6 +343,7 @@ ps -ef | grep -E '[m]avros|[b]ridge_node|[u]av_executor|[e]go_planner|[t]cp_serv
 - `src/swarm_topology_bridge/README.md`：生产 topology、实机 bridge 入口、端口。
 - `src/swarm_uav_executor/README.md`、`services/README.md`：机载实机入口与 systemd 自启。
 - `src/tcp_to_ros/plans/implementation_plan_26091101.md`：本部署适配计划。
+- `src/tcp_to_ros/tools/README.md`：实机运维工具（飞控 ulog 取件/分析、板钟对时）与踩坑记录。
 - `src/tcp_to_ros/test_records/test_record_26091103.md`、`test_record_26091114.md`：实施与 5 轮回归证据。
 
 
