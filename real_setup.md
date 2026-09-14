@@ -55,12 +55,19 @@
      否则 git 检出与构建产物时间戳全错、ROS 日志无法与飞控 ulog 对齐。
    - **只改系统时钟不跨重启**：实测 UAV7 18:46 修正成功、19:00 重启后又回 `Thu 01 Jan 1970 10:57 CST`
      （`timedatectl`：`System clock synchronized: no`）——当时只改了系统时钟、**没有写入 RTC**。
-     用 `src/tcp_to_ros/tools/onboard_clock_fix.sh` 修时会同时 `hwclock --systohc` 写 RTC；
+     用 `src/tcp_to_ros/tools/onboard_clock_fix.sh` 修时会同时写 RTC——2026-09-14 起是**每一路存在的 RTC
+     都用 `-f <dev>` 写 + 回读**（`/dev/rtc` 常是指向 `rtc1` 的 symlink；只写内核默认那路会剩下 1970 的另一路，
+     重启从哪路恢复看 udev/内核，见 `tools/README.md` §6 坑 15①）；
      若输出 `WARN(no RTC device …)`（该板无可用 RTC）则**每次上电/重启后仍要重做**（见 §5.1.1 第 0 步）。
      未修正的轮次里 ROS 日志时间戳为 1970 基，只能靠飞控 ulog 的 `LOG_ENTRY.time_utc`（GPS UTC）反推真实时刻（见 §8）。
    - **写了 RTC 就跨重启**（实测 UAV13，2026-09-14）：14:36 用该脚本修完（系统钟 + RTC），15:00 断电重上电后板钟
      直接是 `2026-09-14 15:04 CST`、`/dev/rtc → rtc1` 回读同值（`who -b` 仍显示 1970 的 boot 记录，属正常）——
      即 `onboard_clock_fix.sh` 一轮修好后，后续上电**不必**再修（`date +%s` 已 ~1.79e9 就别动它）。
+   - **全队 9 台一轮实机修正**（2026-09-14 16:16，UAV 1/3/6/8/10/11/12/13/16）：全 `PASS`、`ExitCode=0`；
+     独立复核（绕开脚本，直接读板钟 + 两路 RTC）每台 **板钟 − GCS ≤ 1 s**、`rtc0`/`rtc1` − 板钟 ≤ 1 s。
+     同一轮暴露出 4 个真机坑（只写默认 RTC → 假 FAIL；ssh 吃掉循环 stdin → **只修第一台且 `exit=0`**；
+     拨钟后 sudo 时间戳「瞬间过期」→ 7 台 `FAIL(rtc write)`；heredoc 注释里的反引号在**本机**执行），
+     脚本与桩测均已修掉，见 `tools/README.md` §6 坑 15。
 5. 飞控侧（现场设置，不属于本工作区代码）：
    - 无 RC 触发的意外保护按现场策略配置；`arm/OFFBOARD` 由遥控器执行。
    - 参数：`COM_RCL_EXCEPT=4`、`NAV_RCL_ACT=0`（与仿真一致的无 RC 策略，现场按实际 RC 情况复核）。
@@ -327,9 +334,12 @@ roslaunch tcp_to_ros gcs_a_real.launch
   ↔ `log_64` 起始 `19:02:20`）。一轮取件用 `src/tcp_to_ros/tools/log_fetch.sh <UAVn>`（同时收
   机载 ROS/终端日志，落到 `$LOG_OUT/UAVn_<时间>/`，含 `manifest.txt`/`md5sums.txt`；见 `tools/README.md` §2）。
 - 时钟修正：`src/tcp_to_ros/tools/onboard_clock_fix.sh 1 2 4 11 16`（裸数字 = UAVn；**每台写入前现取** epoch →
-  远端 `sudo date -s` → 远端 `hwclock --systohc` 写 RTC → 回读复核：**板钟 − 该台基准** ≤ 5 s、且 RTC 回读一致才 PASS；
+  远端 `sudo date -s` → 远端对**每一路存在的 RTC** 都 `hwclock --systohc -f <dev>` 写并回读 →
+  复核：**板钟 − 该台基准** ≤ 5 s、且**每路** RTC 回读一致才 PASS（明细行 `rtc_all=` 逐路列出偏差）；
   容差故意放宽（不要求秒级，依据见 `tools/README.md` §5：机间对齐由 `gps_bias` 负责、参考 swarm 规划器 10 s 才判不同步）；
-  凭据在 `tools/configs/onboard.env`；多台**串行**）；**须在启动栈之前**执行（§3.2 第 1 步、§5.1.1 第 0 步）。
+  凭据在 `tools/configs/onboard.env`；多台**串行**——**一次性传多台后务必数输出行数 = 目标数**：
+  真 ssh 会继承并吃光循环的 stdin，旧版因此**只修第一台还 `exit=0`**（2026-09-14 已修，见 `tools/README.md` §6 坑 15②）；
+  **须在启动栈之前**执行（§3.2 第 1 步、§5.1.1 第 0 步）。
 
 多轮验收的留档命名见 `src/tcp_to_ros/test_records/README.md` §8（`.ros_home_round<n>_<s|f>`）。
 
