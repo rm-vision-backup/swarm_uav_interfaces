@@ -110,7 +110,7 @@ source devel/setup.bash
   工具说明见 `src/tcp_to_ros/tools/README.md` §4。
 - 校验（可选，**不需要**启动 roscore）：`rospack find swarm_uav_interfaces swarm_topology_bridge swarm_uav_executor ego_planner_driver`、
   `rosmsg show swarm_uav_interfaces/UavTaskState`、`ls devel/lib/`。
-- 本节只做「建目录 + clone + 编译」，**不装 systemd、不启任何节点/launch**（启动见 §5）。
+- 本节只做「建目录 + clone + 编译」，**不启任何节点/launch**（启动见 §5）。
 
 #### 3.2.1 实测记录（UAV7 机载，2026-09-13）
 
@@ -157,19 +157,21 @@ mkdir -p "$ROS_LOG_DIR"
 
 ### 5.1 机载电脑（每台，只启动本机）
 
-推荐（systemd，开机自启、失败重启）：
+推荐：机载脚本（本机执行）或地面站批量远程。**不设开机自启**——原 systemd unit（`services/`）
+已于 2026-09-14 删除（未在实机安装过），机载栈只显式启停。
 
 ```bash
-# 首次安装（见 src/swarm_uav_executor/services/README.md）
-sudo cp ~/catkin_swarm6-2/src/swarm_uav_executor/services/swarm-uav-onboard.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable swarm-uav-onboard.service
-# FCU 连接无需传参：现场已在 MAVROS launch 中配置 fcu_url / tgt_system
-sudo systemctl start swarm-uav-onboard.service
-systemctl status swarm-uav-onboard.service
+# —— 机载本机（含 §5.1.1 环境准备 + 终端全量转录，见 ../../swarm_uav_executor/bashs/README.md）——
+bash ~/catkin_swarm6-2/src/swarm_uav_executor/bashs/start_onboard.sh
+bash ~/catkin_swarm6-2/src/swarm_uav_executor/bashs/stop_onboard.sh
+
+# —— 地面站批量（一条命令扇出多台，见 src/tcp_to_ros/tools/README.md §5.1）——
+./src/tcp_to_ros/tools/onboard_ctl.sh start 1-6
+./src/tcp_to_ros/tools/onboard_ctl.sh status 1-6
+./src/tcp_to_ros/tools/onboard_ctl.sh stop 1-6
 ```
 
-手动/调试等价方式见 §5.1.1、§5.1.2（先备环境、留终端输出）。
+手工等价方式见 §5.1.1、§5.1.2 方式 B（先备环境、留终端输出）。
 
 - `uav_name` 默认取本机 `hostname`（= `UAVn`），无需显式传入；
 - `topology_config` 默认加载生产 `swarm_topology_bridge/config/topology.yaml`；
@@ -199,7 +201,7 @@ export ROS_LOG_DIR=$HOME/catkin_swarm6-2/.ros_home/log
 mkdir -p "$ROS_LOG_DIR" "$HOME/catkin_swarm6-2/.tmp/logs"
 ```
 
-- 换终端要重做；systemd 方式免（unit 内已设 `SWARM_WS` / `ROS_HOME` / `ROS_LOG_DIR` 并 source）。
+- 换终端要重做；用 `bashs/start_onboard.sh` 时免（脚本内部已做完本步，见 §5.1）。
 - **板钟**：机载重启后回 1970（§2 第 4 条），本步骤只核对（`date +%s`），时钟修正按 §3.2 第 1 步；
   未修正不影响功能，但本轮 ROS 日志无法与飞控 ulog 直接对齐（§8）。
 
@@ -208,13 +210,8 @@ mkdir -p "$ROS_LOG_DIR" "$HOME/catkin_swarm6-2/.tmp/logs"
 ```bash
 UAV=$(cat /etc/hostname)     # = UAVn，同时用作日志名
 
-# —— 方式 A：systemd（推荐）—— 输出进 journal
-sudo systemctl start swarm-uav-onboard.service
-journalctl -u swarm-uav-onboard.service -f
-# 留档：journalctl -u swarm-uav-onboard.service -b --no-pager \
-#        > ~/catkin_swarm6-2/.tmp/logs/${UAV}_onboard_journal.log
-
 # —— 方式 B：手动/调试 —— 整段终端输出留档（pty 全量转录，-e 透传退出码）
+#    （原「方式 A：systemd / journalctl」已随 services/ 删除，2026-09-14）
 script -q -e -f -c "roslaunch swarm_uav_executor uav_offboard_ego_real.launch" \
   "$HOME/catkin_swarm6-2/.tmp/logs/${UAV}_offboard_ego.log"
 
@@ -267,7 +264,7 @@ roslaunch tcp_to_ros gcs_a_real.launch
 5. **监控**：`/UAVn/uav_task_state`、`/group_a/group_task_state`；机载 `rosout` 关注 `MIN_DISTANCE_BREACH`、
    `direct BRAKE_HOLD locked`、`EGO_PLAN_FAILED`。
 6. **收尾**：按现场规程返航/降落（遥控或地面站 RTL）；**不得就地重启单机/子集机载层**，
-   需要重跑时先整机收口（停 service + 清端口）再整体重启。
+   需要重跑时先整机收口（停机载栈 + 清端口）再整体重启。
 
 ## 7. 运行约束与安全边界
 
@@ -289,7 +286,7 @@ roslaunch tcp_to_ros gcs_a_real.launch
 | 现场 MAVROS launch 输出 | 机载 `~/.tmp/px4_multi.log`（历史 `px4_multi.launch` 的旁路日志，只用于回溯旧轮次；当前机载入口 `uav_offboard_ego_real.launch` 不产生该文件，也不在采集范围） |
 | **飞控 PX4 ulog**（时间基准 = GPS UTC） | MAVLink `LOG_REQUEST_LIST` / `LOG_REQUEST_DATA`（经机载 mavlink-routerd 转发的 `udp://:15500`）；归档示例 `~/Downloads/flight_logs/UAV7_2026-09-13_1900/px4_ulogs/log_58..64.ulg` |
 | 任务结果 JSON | `task_test.py` 输出（含 `status`/`failed_robot_ids`/`ticks`） |
-| 日志下载与取证工具 | `src/tcp_to_ros/tools/`（平铺 + 前缀命名，除 `configs/` 无子目录）：`log_fetch.sh`（日志下载总入口：飞控 ulog + 机载 ROS 会话日志 + planner 诊断 + 终端转录，落到 `UAVn_<时间>/`）、`fcu_ulog_list.py` / `fcu_ulog_fetch.py`（MAVLink 直连飞控列/下 ulog）、`fcu_nsh.py`（只读 nsh 取证，独立于下载链）、`ulog_zcheck.py` / `ulog_cmds.py`（离线读 `.ulg`）、`onboard_clock_fix.sh`（时钟修正）；用法与踩坑见其 `README.md` |
+| 日志下载与取证工具 | `src/tcp_to_ros/tools/`（平铺 + 前缀命名，除 `configs/` 无子目录）：`log_fetch.sh`（日志下载总入口：飞控 ulog + 机载 ROS 会话日志 + planner 诊断 + 终端转录，落到 `UAVn_<时间>/`）、`fcu_ulog_list.py` / `fcu_ulog_fetch.py`（MAVLink 直连飞控列/下 ulog）、`fcu_nsh.py`（只读 nsh 取证，独立于下载链）、`ulog_zcheck.py` / `ulog_cmds.py`（离线读 `.ulg`）、`onboard_clock_fix.sh`（时钟修正）、`onboard_ctl.sh`（多机机载栈远程启停：`start/stop/status/logs`）；用法与踩坑见其 `README.md` |
 
 - 归档一轮测试时**同时拉飞控 ulog**：ROS 侧板钟未修正时（§2 第 4 条）日志为 1970 基，
   只有 ulog 的 `LOG_ENTRY.time_utc`（GPS UTC）能锚定真实时刻（实测 UAV7：ROS `arm+OFFBOARD detected`
@@ -332,9 +329,10 @@ python3 references/runtime/task_test.py --backend tcp --group A --task prepare \
 
 ```bash
 # —— 机载（每台，hostname=UAVn）——
-sudo systemctl start|stop|status|enable|disable swarm-uav-onboard.service
-# 或手动调试
-roslaunch swarm_uav_executor uav_offboard_ego_real.launch   # 不传 fcu_url：现场配在 MAVROS launch
+bash ~/catkin_swarm6-2/src/swarm_uav_executor/bashs/start_onboard.sh   # 起（含环境准备 + 终端转录）
+bash ~/catkin_swarm6-2/src/swarm_uav_executor/bashs/stop_onboard.sh    # 停（SIGINT→TERM→KILL）
+# 或从地面站一条命令批量：src/tcp_to_ros/tools/onboard_ctl.sh start|stop|status 1-6
+roslaunch swarm_uav_executor uav_offboard_ego_real.launch   # 手动调试用；不传 fcu_url：现场配在 MAVROS launch
 rosnode list
 rostopic echo -n1 /mavros/state
 
@@ -353,7 +351,7 @@ ps -ef | grep -E '[m]avros|[b]ridge_node|[u]av_executor|[e]go_planner|[t]cp_serv
 
 - `src/tcp_to_ros/README.md`、`CONTEXT.md`：GCS_A 流程、校准集合、身份边界。
 - `src/swarm_topology_bridge/README.md`：生产 topology、实机 bridge 入口、端口。
-- `src/swarm_uav_executor/README.md`、`services/README.md`：机载实机入口与 systemd 自启。
+- `src/swarm_uav_executor/README.md`、`bashs/README.md`：机载实机入口与手动/远程启停。
 - `src/tcp_to_ros/plans/implementation_plan_26091101.md`：本部署适配计划。
 - `src/tcp_to_ros/tools/README.md`：实机运维工具（日志下载/分析、时钟修正）与踩坑记录。
 - `src/tcp_to_ros/test_records/test_record_26091103.md`、`test_record_26091114.md`：实施与 5 轮回归证据。
