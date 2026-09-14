@@ -53,6 +53,9 @@
      用 `src/tcp_to_ros/tools/onboard_clock_fix.sh` 修时会同时 `hwclock --systohc` 写 RTC；
      若输出 `WARN(no RTC device …)`（该板无可用 RTC）则**每次上电/重启后仍要重做**（见 §5.1.1 第 0 步）。
      未修正的轮次里 ROS 日志时间戳为 1970 基，只能靠飞控 ulog 的 `LOG_ENTRY.time_utc`（GPS UTC）反推真实时刻（见 §8）。
+   - **写了 RTC 就跨重启**（实测 UAV13，2026-09-14）：14:36 用该脚本修完（系统钟 + RTC），15:00 断电重上电后板钟
+     直接是 `2026-09-14 15:04 CST`、`/dev/rtc → rtc1` 回读同值（`who -b` 仍显示 1970 的 boot 记录，属正常）——
+     即 `onboard_clock_fix.sh` 一轮修好后，后续上电**不必**再修（`date +%s` 已 ~1.79e9 就别动它）。
 5. 飞控侧（现场设置，不属于本工作区代码）：
    - 无 RC 触发的意外保护按现场策略配置；`arm/OFFBOARD` 由遥控器执行。
    - 参数：`COM_RCL_EXCEPT=4`、`NAV_RCL_ACT=0`（与仿真一致的无 RC 策略，现场按实际 RC 情况复核）。
@@ -132,7 +135,9 @@ source devel/setup.bash
 | 项 | 实测值 |
 |---|---|
 | 板钟（修正前 → 后） | `1970` → `2026-09-14 14:36 CST`；`onboard_clock_fix.sh 13` 在本机侧两处修复（`sshpass` 分支 + 选项优先级）后实机跑通（`sudo -S` 生效） |
-| RTC 回读 | `/dev/rtc → rtc1`（tegra_rtc，开机定时源）：`hwclock --show -f /dev/rtc0` = `hwclock --show -f /dev/rtc1` = `2026-09-14 14:49 CST`、`/proc/driver/rtc` = `2026-09-14 06:49`（UTC）✓ **两路 RTC 都已写对**（跨重启未验） |
+| 板钟跨重启 | **已验**：15:00 断电重上电 → 板钟直接 `2026-09-14 15:04 CST`（`date +%s` ≈ 1.789e9）；`who -b` 仍写 1970 的 boot 行（正常） |
+| RTC 回读 | `/dev/rtc → rtc1`（tegra_rtc，开机定时源）：`hwclock --show -f /dev/rtc0` = `hwclock --show -f /dev/rtc1` = `2026-09-14 14:49 CST`、`/proc/driver/rtc` = `2026-09-14 06:49`（UTC）✓ **两路 RTC 都已写对**；注：本板 `timedatectl show -p RTCTime --value` 返回**空**（systemd `degraded`），单靠它会让 RTC 段静默 `n/a` |
+| 时钟工具修的两处 | ① 验收基线：老版按 `sys_after - sys_before` 判 → 板钟只偏 30 s 时假 `FAIL(system clock off by 30s)`（事后核对板钟 = 本机同 epoch）；改为「板钟 − 本机基准」后拨偏 60 s 回归 `SYS_OFF=0s` PASS ② RTC 回读三源兜底 + `rtc_src=` 回显（`sudo -n` 在 `$( )` 里失效 → 命令替换内改用 `sudo -S` 喂密码），`FAIL(rtc off by -54533s)`（`date -d ""` 取到当天 0 点）已消除 |
 | 现场旧自启 | `~/.config/autostart/formation_follow.sh.desktop`（`gnome-terminal -x ~/formation_follow.sh` → `catkin_ws` + `roslaunch mavros px4_multi.launch` + `offb_hover.py`）：已置 `X-GNOME-Autostart-enabled=false` 并停掉老进程；`mavlink-routerd`（`/dev/ttyTHS0:921600 → 192.168.5.241/242:15500 + 127.0.0.1:15500`）保留 |
 | 首次 `start` 的失败点 | `set -eu` 下 `source /opt/ros/noetic/setup.bash` → `1.ros_distro.sh: ROS_DISTRO: unbound variable`（从 GCS ssh 必现，手敲终端不复现）→ 修 `bashs/start_onboard.sh`（`set +u` 包住 source），executor `6356da4`；旧版现象 = `start` FAIL、机载 `.tmp/logs/onboard_ctl.err` 只有该行、转录文件不生成 |
 | `onboard_ctl.sh start 13` | PASS，**4.0 s**（`SETTLE_S=3`）；`status 13` 18 s 后 `UP(1)`、转录 33 162 B；二轮再 PASS（转录分隔行 `===== UAV13 启动 2026-09-14 14:45:40 +0800 =====` 追加、66 588 B） |
@@ -140,10 +145,12 @@ source devel/setup.bash
 | 转录 | `.tmp/logs/UAV13_offboard_ego.log`（`script -a` 追加；末行 `Script done … [COMMAND_EXIT_CODE="0"]`） |
 | `onboard_ctl.sh stop 13` ×2 | `LEFT 0` PASS、**2.99 s / 2.99 s**；板侧 roslaunch/mavros/ego/bridge 全退、`udp 15500` 释放 |
 | `onboard_ctl.sh logs 13` | 正常（远端 `tail` + 机载路径/字节回显） |
+| **重上电复验（同日 15:10，机载四仓 `git pull` 后）** | 起栈前 `status` = `DOWN`（无残留）+ `udp 15500` 空闲 + 旧自启仍 `X-GNOME-Autostart-enabled=false` + `mavlink-routerd` 在；`start` PASS **3.96 s** → 18 s 后 `UP(1)`；`logs` 见 FCU `VER: 13.1`；`/mavros/state` = `connected: True / armed: False / guided: True / mode: AUTO.LOITER`；`stop` `LEFT 0` PASS **3.01 s**；`pgrep -x roslaunch` = 1 → 0 |
 | `log_fetch.sh 13` | 归档 `~/Downloads/flight_logs/UAV13_2026-09-14_1447`：落地 16 项、`FAIL 0`、缺/截断 0、`fcu/log_46.ulg` 653 017 B（全量）、`md5sum -c md5sums.txt` 全 OK；单条 638 KB ulog 下载 ≈40 s |
 | 坑→文档 | 旧 `px4_multi.launch` 与入口自带 mavros 抢 `udp:15500`、归档别落工作空间、`pgrep -f` 自匹配 → `../../tcp_to_ros/tools/README.md` §6 坑 10–13 |
 
-- **未验**：arm/OFFBOARD/起飞（本机在地、`armed: False`）、跨重启 RTC 保持、多机并行（本次现场只有 UAV13 可用）。
+- **未验**：arm/OFFBOARD/起飞（本机在地、`armed: False`）、多机（现场只有 UAV13；工具链与流程均按**串行**设计，
+  链路带宽小、串行够用，未做多机实跑）。
 - 关联提交：executor `6356da4`（`set +u` 包 source + `bashs/README.md` 记坑）。
 
 ### 3.3 环境变量（每台机器）
@@ -314,8 +321,8 @@ roslaunch tcp_to_ros gcs_a_real.launch
   ↔ `log_64` 起始 `19:02:20`）。一轮取件用 `src/tcp_to_ros/tools/log_fetch.sh <UAVn>`（同时收
   机载 ROS/终端日志，落到 `$LOG_OUT/UAVn_<时间>/`，含 `manifest.txt`/`md5sums.txt`；见 `tools/README.md` §2）。
 - 时钟修正：`src/tcp_to_ros/tools/onboard_clock_fix.sh 1 2 4 11 16`（裸数字 = UAVn；本机取 epoch →
-  远端 `sudo date -s` → 远端 `hwclock --systohc` 写 RTC → 回读复核，|Δ| ≤ 2 s 判 PASS；
-  凭据在 `tools/configs/onboard.env`）；**须在启动栈之前**执行（§3.2 第 1 步、§5.1.1 第 0 步）。
+  远端 `sudo date -s` → 远端 `hwclock --systohc` 写 RTC → 回读复核：**板钟 − 本机基准** ≤ 2 s、且 RTC 回读一致才 PASS；
+  凭据在 `tools/configs/onboard.env`；多台**串行**）；**须在启动栈之前**执行（§3.2 第 1 步、§5.1.1 第 0 步）。
 
 多轮验收的留档命名见 `src/tcp_to_ros/test_records/README.md` §8（`.ros_home_round<n>_<s|f>`）。
 
