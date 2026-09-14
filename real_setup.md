@@ -45,6 +45,11 @@
    - bridge 用 hostname 判定本机身份；无法唯一匹配 `config/topology.yaml` 节点时启动失败。
 4. 网络与时钟：所有机器同一网段可互通；建议 NTP/时钟同步（机间 intent 时间戳依赖 GPS bias 修正，
    但系统时钟漂移仍会影响日志对齐）。
+   - **机间对齐不靠系统钟齐平**：`gps_bias` 把邻机时间戳换算到本机时间轴
+     （`bias = header.stamp − GPS UTC`，`T_own = T_other − bias_other + bias_own`），两端系统钟偏差在差分里抵消；
+     系统钟只要「大致对」即可 —— 参考 swarm 规划器 10 s 才判「不同步」丢轨迹，本机 driver 的 intent 接收窗 ±30 s
+     （`neighbor_intent_stale_s`）。因此时钟修正工具的容差是 **5 s**（故意放宽，不要求秒级；见 `tools/README.md` §5）。
+     真正需要秒级的是**日志/时间轴对齐**（与飞控 ulog 的 GPS UTC 对表）。
    - **部署/编译前先做时钟修正**：机载电脑停在 `1970-01-01`（实测 UAV7：`Thu 01 Jan 1970 10:44 CST`、
      `date +%s ≈ 9.8e3`）时，须按 §3.2 第 1 步把本机系统时钟同步到机载（并写入机载 RTC）；
      否则 git 检出与构建产物时间戳全错、ROS 日志无法与飞控 ulog 对齐。
@@ -138,6 +143,7 @@ source devel/setup.bash
 | 板钟跨重启 | **已验**：15:00 断电重上电 → 板钟直接 `2026-09-14 15:04 CST`（`date +%s` ≈ 1.789e9）；`who -b` 仍写 1970 的 boot 行（正常） |
 | RTC 回读 | `/dev/rtc → rtc1`（tegra_rtc，开机定时源）：`hwclock --show -f /dev/rtc0` = `hwclock --show -f /dev/rtc1` = `2026-09-14 14:49 CST`、`/proc/driver/rtc` = `2026-09-14 06:49`（UTC）✓ **两路 RTC 都已写对**；注：本板 `timedatectl show -p RTCTime --value` 返回**空**（systemd `degraded`），单靠它会让 RTC 段静默 `n/a` |
 | 时钟工具修的两处 | ① 验收基线：老版按 `sys_after - sys_before` 判 → 板钟只偏 30 s 时假 `FAIL(system clock off by 30s)`（事后核对板钟 = 本机同 epoch）；改为「板钟 − 本机基准」后拨偏 60 s 回归 `SYS_OFF=0s` PASS ② RTC 回读三源兜底 + `rtc_src=` 回显（`sudo -n` 在 `$( )` 里失效 → 命令替换内改用 `sudo -S` 喂密码），`FAIL(rtc off by -54533s)`（`date -d ""` 取到当天 0 点）已消除 |
+| 时钟工具容差复核（同日 15:23） | ③ 容差 `2 s → 5 s` + **基准逐台现取**：验收量含一次 ssh 往返，2 s 会假 FAIL；共用一趟基准还会让串行靠后的板「旧 epoch」。实机（UAV13）：正常修 `SYS_OFF=0s` PASS；**先把板钟拨偏 +8 s** 再修 → `SYS_OFF=0s`、`sys_step=-7s`（仅明细）、`RTC_DELTA=1s`、`PASS`；桩测 `STUB_SSH_DELAY=3` 下 `TOLERANCE_S=2` FAIL / `=5` PASS、三台 `SYS_OFF` 恒 3 s 不累积；偏 8 s 仍 `FAIL`（放宽不牺牲检出） |
 | 现场旧自启 | `~/.config/autostart/formation_follow.sh.desktop`（`gnome-terminal -x ~/formation_follow.sh` → `catkin_ws` + `roslaunch mavros px4_multi.launch` + `offb_hover.py`）：已置 `X-GNOME-Autostart-enabled=false` 并停掉老进程；`mavlink-routerd`（`/dev/ttyTHS0:921600 → 192.168.5.241/242:15500 + 127.0.0.1:15500`）保留 |
 | 首次 `start` 的失败点 | `set -eu` 下 `source /opt/ros/noetic/setup.bash` → `1.ros_distro.sh: ROS_DISTRO: unbound variable`（从 GCS ssh 必现，手敲终端不复现）→ 修 `bashs/start_onboard.sh`（`set +u` 包住 source），executor `6356da4`；旧版现象 = `start` FAIL、机载 `.tmp/logs/onboard_ctl.err` 只有该行、转录文件不生成 |
 | `onboard_ctl.sh start 13` | PASS，**4.0 s**（`SETTLE_S=3`）；`status 13` 18 s 后 `UP(1)`、转录 33 162 B；二轮再 PASS（转录分隔行 `===== UAV13 启动 2026-09-14 14:45:40 +0800 =====` 追加、66 588 B） |
@@ -320,8 +326,9 @@ roslaunch tcp_to_ros gcs_a_real.launch
   只有 ulog 的 `LOG_ENTRY.time_utc`（GPS UTC）能锚定真实时刻（实测 UAV7：ROS `arm+OFFBOARD detected`
   ↔ `log_64` 起始 `19:02:20`）。一轮取件用 `src/tcp_to_ros/tools/log_fetch.sh <UAVn>`（同时收
   机载 ROS/终端日志，落到 `$LOG_OUT/UAVn_<时间>/`，含 `manifest.txt`/`md5sums.txt`；见 `tools/README.md` §2）。
-- 时钟修正：`src/tcp_to_ros/tools/onboard_clock_fix.sh 1 2 4 11 16`（裸数字 = UAVn；本机取 epoch →
-  远端 `sudo date -s` → 远端 `hwclock --systohc` 写 RTC → 回读复核：**板钟 − 本机基准** ≤ 2 s、且 RTC 回读一致才 PASS；
+- 时钟修正：`src/tcp_to_ros/tools/onboard_clock_fix.sh 1 2 4 11 16`（裸数字 = UAVn；**每台写入前现取** epoch →
+  远端 `sudo date -s` → 远端 `hwclock --systohc` 写 RTC → 回读复核：**板钟 − 该台基准** ≤ 5 s、且 RTC 回读一致才 PASS；
+  容差故意放宽（不要求秒级，依据见 `tools/README.md` §5：机间对齐由 `gps_bias` 负责、参考 swarm 规划器 10 s 才判不同步）；
   凭据在 `tools/configs/onboard.env`；多台**串行**）；**须在启动栈之前**执行（§3.2 第 1 步、§5.1.1 第 0 步）。
 
 多轮验收的留档命名见 `src/tcp_to_ros/test_records/README.md` §8（`.ros_home_round<n>_<s|f>`）。
