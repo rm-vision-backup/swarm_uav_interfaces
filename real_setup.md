@@ -125,6 +125,27 @@ source devel/setup.bash
 | 产物校验 | `rospack find` 4 包指向 `~/catkin_swarm6-2/src/*`；`devel/lib/libego_planner_core.so`、`devel/lib/libego_planner_driver_node_lib.so`、`devel/lib/swarm_uav_executor/` |
 | 编译日志 | 机载 `~/catkin_swarm6-2/.tmp/logs/UAV7_catkin_build.log`；归档 `~/catkin_swarm6-2/.tmp/archive_260913/uav7_260913/uav7_catkin_build_260913.log` |
 
+#### 3.2.2 实测记录（UAV13 机载，2026-09-14）
+
+首跑本轮新增的机载脚本与新入口（UAV13 在地、未 arm；数据来自 `onboard_ctl.sh` / `log_fetch.sh` 输出 + 板侧复核）：
+
+| 项 | 实测值 |
+|---|---|
+| 板钟（修正前 → 后） | `1970` → `2026-09-14 14:36 CST`；`onboard_clock_fix.sh 13` 在本机侧两处修复（`sshpass` 分支 + 选项优先级）后实机跑通（`sudo -S` 生效） |
+| RTC 回读 | `/dev/rtc → rtc1`（tegra_rtc，开机定时源）：`hwclock --show -f /dev/rtc0` = `hwclock --show -f /dev/rtc1` = `2026-09-14 14:49 CST`、`/proc/driver/rtc` = `2026-09-14 06:49`（UTC）✓ **两路 RTC 都已写对**（跨重启未验） |
+| 现场旧自启 | `~/.config/autostart/formation_follow.sh.desktop`（`gnome-terminal -x ~/formation_follow.sh` → `catkin_ws` + `roslaunch mavros px4_multi.launch` + `offb_hover.py`）：已置 `X-GNOME-Autostart-enabled=false` 并停掉老进程；`mavlink-routerd`（`/dev/ttyTHS0:921600 → 192.168.5.241/242:15500 + 127.0.0.1:15500`）保留 |
+| 首次 `start` 的失败点 | `set -eu` 下 `source /opt/ros/noetic/setup.bash` → `1.ros_distro.sh: ROS_DISTRO: unbound variable`（从 GCS ssh 必现，手敲终端不复现）→ 修 `bashs/start_onboard.sh`（`set +u` 包住 source），executor `6356da4`；旧版现象 = `start` FAIL、机载 `.tmp/logs/onboard_ctl.err` 只有该行、转录文件不生成 |
+| `onboard_ctl.sh start 13` | PASS，**4.0 s**（`SETTLE_S=3`）；`status 13` 18 s 后 `UP(1)`、转录 33 162 B；二轮再 PASS（转录分隔行 `===== UAV13 启动 2026-09-14 14:45:40 +0800 =====` 追加、66 588 B） |
+| 起栈内容 | 9 节点：`/mavros`、`/ego_planner_driver`、`/swarm_bridge`、`/gps_bias_node`、`/pose_relay`、`/setpoint_relay`、`/gp_origin_receiver`、`/uav_executor_UAV13`、`/rosout`；`/mavros/state` = `connected: True / armed: False / guided: True / mode: AUTO.LOITER`；mavros 绑定 `udp 15500`；转录内 FCU `VER: 13.1` + bridge 已代理 UAV12/14/15/16 服务 |
+| 转录 | `.tmp/logs/UAV13_offboard_ego.log`（`script -a` 追加；末行 `Script done … [COMMAND_EXIT_CODE="0"]`） |
+| `onboard_ctl.sh stop 13` ×2 | `LEFT 0` PASS、**2.99 s / 2.99 s**；板侧 roslaunch/mavros/ego/bridge 全退、`udp 15500` 释放 |
+| `onboard_ctl.sh logs 13` | 正常（远端 `tail` + 机载路径/字节回显） |
+| `log_fetch.sh 13` | 归档 `~/Downloads/flight_logs/UAV13_2026-09-14_1447`：落地 16 项、`FAIL 0`、缺/截断 0、`fcu/log_46.ulg` 653 017 B（全量）、`md5sum -c md5sums.txt` 全 OK；单条 638 KB ulog 下载 ≈40 s |
+| 坑→文档 | 旧 `px4_multi.launch` 与入口自带 mavros 抢 `udp:15500`、归档别落工作空间、`pgrep -f` 自匹配 → `../../tcp_to_ros/tools/README.md` §6 坑 10–13 |
+
+- **未验**：arm/OFFBOARD/起飞（本机在地、`armed: False`）、跨重启 RTC 保持、多机并行（本次现场只有 UAV13 可用）。
+- 关联提交：executor `6356da4`（`set +u` 包 source + `bashs/README.md` 记坑）。
+
 ### 3.3 环境变量（每台机器）
 
 ```bash
