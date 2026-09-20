@@ -316,6 +316,30 @@ roslaunch tcp_to_ros gcs_a_real.launch
 - 不得修改安全门禁、不得减少 UAV 数量、不得用无界等待/旁路逻辑掩盖失败。
 - A16 为备用/替换身份：映射与路由已就绪；**实机启用需上游 runtime roster/配置支持**（不属本工作区）。
 
+### 7.1 已批准的例外：4 机工程测试（2026-09-17）
+
+上面"不得减少 UAV 数量"针对的是**联合验收任务**：禁止为了凑通过而削减已冻结的
+12/15 机参与集，禁止绕开门禁掩盖失败。**它不禁止单独定义、单独标注的小机数工程测试。**
+
+已批准的一次例外：**A06 / A08 / A10 / A12 四机的编队准备 + 侦查测试**，与 15 机联合
+验收任务完全分离。
+
+该例外必须同时满足以下全部条件，缺一即回到上一条约束：
+
+1. **不改任何安全门禁**：`ego_swarm.min_center_distance_m`、`protected_distance_m`、
+   各类超时与 tolerance 一律不动。
+2. **不改任何共享配置**：`config/formation_offsets.yaml`、`config/calibration_defaults.yaml`、
+   `config/uav_identity_map.yaml`、`config/topology.yaml` 保持原样。四机专用配置放在
+   `config/formation_offsets_four_uav.yaml` 与 `config/calibration_four_uav.yaml`，
+   由 `launch/gcs_a_real_four_uav.launch` 加载。
+3. **不复用联合任务包**：四机任务数据在 `verification/four_uav_recon/package/`，
+   不进入 `runtime/examples/joint_mission/`。
+4. **不只是"去掉约束"**：编队间距 5.0 m 为刻意选择（4.0 m 余量），不是为了通过测试
+   而下调；4 机任务不下发 `FAULT_EXIT`、不做 `recover`，因为没有 reserve。
+5. **不替代验收**：本例外不构成 12/15 机联合任务的任何验收证据。
+
+依据：`quality_reports/plans/steady-soaring-stroustrup.md`。
+
 ## 8. 日志与证据
 
 | 来源 | 位置 |
