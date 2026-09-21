@@ -340,6 +340,28 @@ roslaunch tcp_to_ros gcs_a_real.launch
 
 依据：`quality_reports/plans/steady-soaring-stroustrup.md`。
 
+### 7.2 已批准的单机预验证（2026-09-20）
+
+四机/15 机联飞**之前**，允许先做**单架 A06（执行层 UAV6）的"起飞 + 准备编队"预验证**，
+用于确认链路、标定、任务下发与安全兜底；它与 §7.1 的四机测试、与联合验收任务都完全分离。
+
+该预验证必须同时满足以下全部条件：
+
+1. **不改任何安全门禁**：`ego_swarm.min_center_distance_m`、各类超时与 tolerance 一律不动。
+2. **不改任何共享配置**：单机专用配置放在
+   `tcp_to_ros/config/formation_offsets_single_uav.yaml` 与
+   `tcp_to_ros/config/calibration_single_uav.yaml`，由薄 wrapper
+   `tcp_to_ros/launch/gcs_a_real_single_uav.launch` 加载（其内部仍 include §7.1 的四机实机入口）。
+3. **不复用联合任务包**：单机任务数据在 `verification/single_uav_recon/package/`，
+   只含 A06 与 `prepare-a`；不下发侦查、不下发 `FAULT_EXIT` / `recover`。
+4. **范围 = "起飞 + 准备编队 + 侦查航线"**（单机自己当领机、没有跟机）：不下发 `FAULT_EXIT`、
+   不做 `recover`。注意 prepare 目标 (-2.5,-2.5,12) 对单机是**真实 3.54 m 平移**，而四机里
+   A06 因处在阵心原点上、同一坐标近似不动 —— 两者语义不同，不可互相替代（单机覆盖不到
+   四机 A06 的"近似不动"特例）；反过来单机也验证不到"跟机保持 5 m 编队"，那要等四机。
+5. **不替代验收**：本预验证不构成 12/15 机联合任务或 §7.1 四机测试的任何验收证据。
+
+现场步骤、判据与仿真彩排见 `verification/single_uav_recon/README.md`。
+
 ## 8. 日志与证据
 
 | 来源 | 位置 |
