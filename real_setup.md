@@ -216,7 +216,7 @@ bash ~/catkin_swarm6-2/src/swarm_uav_executor/bashs/stop_onboard.sh
 
 - `uav_name` 默认取本机 `hostname`（= `UAVn`），无需显式传入；
 - `topology_config` 默认加载生产 `swarm_topology_bridge/config/topology.yaml`；
-- `diagnostic_log_dir` 默认 `~/catkin_swarm6-2/runtime_logs/ego_planner`；
+- `diagnostic_log_dir` 默认 `~/catkin_swarm6-2/.ros_home/log/ego_planner`；
 - **不传 `fcu_url` / `tgt_system`**：实机 FCU 链路以机载机 MAVROS launch 的现场配置为准（见 §4），
   本入口不再要求也不允许覆盖；
 - **该入口不 arm、不 OFFBOARD、不起飞、不发送任务 START**（实机由遥控器操作）。
@@ -367,7 +367,7 @@ roslaunch tcp_to_ros gcs_a_real.launch
 | 来源 | 位置 |
 |---|---|
 | 机载 ROS 日志 | `~/catkin_swarm6-2/.ros_home/log/<session>/`（rosout、各节点日志） |
-| planner 诊断 | `~/catkin_swarm6-2/runtime_logs/ego_planner/UAVn-ego-planner.log` |
+| planner 诊断 | `~/catkin_swarm6-2/.ros_home/log/ego_planner/UAVn-ego-planner.log` |
 | GCS_A 日志 | `~/catkin_swarm6-2/.ros_home/log/<session>/`（bridge/backend/calibration/tcp_server） |
 | 终端全量转录（§5.1.2 方式 B） | `~/catkin_swarm6-2/.tmp/logs/${UAV}_offboard_ego.log`（漏设 `UAV` 时为 `_offboard_ego.log`） |
 | 现场 MAVROS launch 输出 | 机载 `~/.tmp/px4_multi.log`（历史 `px4_multi.launch` 的旁路日志，只用于回溯旧轮次；当前机载入口 `uav_offboard_ego_real.launch` 不产生该文件，也不在采集范围） |
