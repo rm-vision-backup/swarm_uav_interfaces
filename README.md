@@ -39,7 +39,7 @@ Group A 地面站与单机执行器共同依赖的纯 ROS `msg/srv` 契约包。
 ```bash
 source /opt/ros/noetic/setup.bash
 catkin build swarm_uav_interfaces
-source /home/yjq/catkin_swarm6-2/devel/setup.bash
+source "$HOME/catkin_swarm6-2/devel/setup.bash"
 rosmsg show swarm_uav_interfaces/UavTaskState
 rosmsg show swarm_uav_interfaces/UavLinkHealth
 rossrv show swarm_uav_interfaces/UavTask
