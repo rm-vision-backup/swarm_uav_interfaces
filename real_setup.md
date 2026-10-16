@@ -4,6 +4,9 @@
 > 依据：`implementation_plan_26091101.md`（实机多主部署适配，已实施）。
 > 与仿真流程的区别：**入口、身份、topology 全部切换为实机版本**；仿真 15 机流程不受影响。
 > 实机飞行前必须完成现场门禁（不上桨验证 → 上桨）。本说明不替代现场安全评审。
+> **日常操作入口（2026-10-16）**：[实机测试工作流](../../verification/real_uav_workflow/README.md)。
+> 本文保留安装细节与历史排查；当前桥默认 `packing=bundle`（10 Hz、单 Topic 流端口 4200），
+> 旧逐话题端口仅适用于 legacy。新增飞机/更换机队时不能直接套用本文默认联合任务配置。
 
 ---
 
@@ -23,7 +26,7 @@
 
 | 用途 | 端口 | 说明 |
 |---|---|---|
-| bridge topic（每台机） | `4200 + idx`（idx=0..10） | 生产 topology 共 11 个 topic；`base_port=4200`（冻结） |
+| bridge topic（每台机） | bundle：`4200`；legacy：`4200 + idx`（idx=0..10） | 当前 `packing=bundle`、`bundle_port=4200`；同队及 GCS 不可混跑两种协议 |
 | bridge service（每台机） | `14000` | `service_base_port=14000`（冻结） |
 | GCS_A TCP server | `39001` | 仅 GCS_A 对上位机/runtime；监听 `0.0.0.0` |
 | 本机 ROS Master | `11311` | 每台机各自本地 Master，不跨机 |
@@ -184,9 +187,9 @@ mkdir -p "$ROS_LOG_DIR"
 |---|---|
 | `tcp_to_ros/config/uav_identity_map.yaml` | `A01..A16 → UAV1..UAV16`，`hostname`、`ip` 与现场一致（A16 为备用机） |
 | `tcp_to_ros/config/calibration_defaults.yaml` | `calibration_uavs`（默认 UAV1–UAV6，参与原点/航向冻结）、`all_uavs`（默认 UAV1–UAV16，仅确认记账） |
-| `swarm_topology_bridge/config/topology.yaml` | `GCS_A` + `UAV1..UAV16` 物理 IP；所有节点 `port_offset: 0`；`base_port: 4200`、`service_base_port: 14000`；生产 topic/service 与接收矩阵 |
+| `swarm_topology_bridge/config/topology.yaml` | `GCS_A` + `UAV1..UAV16` 物理 IP；`port_offset: 0`；当前 `packing: bundle`、`bundle_port: 4200`、`bundle_tick_hz: 10`、`service_base_port: 14000`；生产 topic/service 与接收矩阵 |
 | 机载 MAVROS launch（`/opt/ros/noetic/share/mavros/launch/px4.launch`，现场 `px4_multi.launch`） | 现场按机配置 `fcu_url`、`tgt_system`（实测 UAV6：`udp://:15500@`、`6`）；本工作区机载入口 `uav_offboard_ego_real.launch` **不传**这两个参数 |
-| 防火墙 | 放行 `4200–4211`（每机 topic）、`14000`（service）、GCS_A `39001`（对上位机） |
+| 防火墙 | 当前 bundle：每机 `4200`（topic）、`14000`（service）、GCS_A `39001`（对上位机）；legacy 才使用 `4200–4210`，本流程不自动修改防火墙 |
 
 启动校验（失败即拒绝启动，fail-closed）：
 
@@ -211,6 +214,9 @@ bash ~/catkin_swarm6-2/src/swarm_uav_executor/bashs/stop_onboard.sh
 ./src/tcp_to_ros/tools/onboard_ctl.sh status 1-6
 ./src/tcp_to_ros/tools/onboard_ctl.sh stop 1-6
 ```
+
+以上是通用工具示例，不包含 recon 的逐机邻居参数。实际编队测试须按对应机队规程逐机传入
+`neighbor_intents`、`neighbor_odom_topics` 等参数；不能直接用无参数批量启动替代正式机载配置。
 
 手工等价方式见 §5.1.1、§5.1.2 方式 B（先备环境、留终端输出）。
 
@@ -271,12 +277,14 @@ roslaunch swarm_uav_executor uav_offboard_ego_real.launch 2>&1 \
 ### 5.2 GCS_A 地面站
 
 ```bash
-roslaunch tcp_to_ros gcs_a_real.launch
+env -u ROS_HOSTNAME ROS_IP=192.168.5.241 ROS_MASTER_URI=http://localhost:11311 \
+  roslaunch tcp_to_ros gcs_a_real.launch
 # = swarm_topology_bridge 实机 bridge（uav_name=GCS_A，加载生产 topology.yaml）
 #   + gcs_a_calibration + gcs_a_backend + tcp_server_node（0.0.0.0:39001）
 ```
 
 可选覆盖：`topology_config:=<path>`、`tcp_port:=39001`。
+三/四/五机工程任务须换成对应 `gcs_a_real_*_uav.launch`，不能沿用默认联合任务的标定集合/formation。
 
 ### 5.3 就绪检查
 
@@ -373,11 +381,11 @@ roslaunch tcp_to_ros gcs_a_real.launch
 | 现场 MAVROS launch 输出 | 机载 `~/.tmp/px4_multi.log`（历史 `px4_multi.launch` 的旁路日志，只用于回溯旧轮次；当前机载入口 `uav_offboard_ego_real.launch` 不产生该文件，也不在采集范围） |
 | **飞控 PX4 ulog**（时间基准 = GPS UTC） | MAVLink `LOG_REQUEST_LIST` / `LOG_REQUEST_DATA`（经机载 mavlink-routerd 转发的 `udp://:15500`）；归档示例 `~/Downloads/flight_logs/UAV7_2026-09-13_1900/px4_ulogs/log_58..64.ulg` |
 | 任务结果 JSON | `task_test.py` 输出（含 `status`/`failed_robot_ids`/`ticks`） |
-| 日志下载与取证工具 | `src/tcp_to_ros/tools/`（平铺 + 前缀命名，除 `configs/` 无子目录）：`log_fetch.sh`（日志下载总入口：飞控 ulog + 机载 ROS 会话日志 + planner 诊断 + 终端转录，落到 `UAVn_<时间>/`）、`fcu_ulog_list.py` / `fcu_ulog_fetch.py`（MAVLink 直连飞控列/下 ulog）、`fcu_nsh.py`（只读 nsh 取证，独立于下载链）、`ulog_zcheck.py` / `ulog_cmds.py`（离线读 `.ulg`）、`onboard_clock_fix.sh`（时钟修正）、`onboard_ctl.sh`（多机机载栈远程启停：`start/stop/status/logs`）；用法与踩坑见其 `README.md` |
+| 日志下载与取证工具 | `src/tcp_to_ros/tools/`：`log_fetch.sh` 默认收机载 ROS/health/planner/终端日志，**不含 ulog**；需飞控日志时加 `--ulog`。`fcu_ulog_list.py` / `fcu_ulog_fetch.py` 列/下 ulog，`fcu_nsh.py` 只读取证，`ulog_zcheck.py` / `ulog_cmds.py` 离线分析；`onboard_clock_fix.sh` 修时，`onboard_ctl.sh` 远程启停。用法见其 `README.md` |
 
-- 归档一轮测试时**同时拉飞控 ulog**：ROS 侧板钟未修正时（§2 第 4 条）日志为 1970 基，
+- 需要与飞控交叉取证时，落地 disarm 后**按需另取 ulog**：ROS 侧板钟未修正时（§2 第 4 条）日志为 1970 基，
   只有 ulog 的 `LOG_ENTRY.time_utc`（GPS UTC）能锚定真实时刻（实测 UAV7：ROS `arm+OFFBOARD detected`
-  ↔ `log_64` 起始 `19:02:20`）。一轮取件用 `src/tcp_to_ros/tools/log_fetch.sh <UAVn>`（同时收
+  ↔ `log_64` 起始 `19:02:20`）。含飞控的一轮取件用 `src/tcp_to_ros/tools/log_fetch.sh --ulog <UAVn>`（同时收
   机载 ROS/终端日志，落到 `$LOG_OUT/UAVn_<时间>/`，含 `manifest.txt`/`md5sums.txt`；见 `tools/README.md` §2）。
 - 时钟修正：`src/tcp_to_ros/tools/onboard_clock_fix.sh 1 2 4 11 16`（裸数字 = UAVn；**每台写入前现取** epoch →
   远端 `sudo date -s` → 远端对**每一路存在的 RTC** 都 `hwclock --systohc -f <dev>` 写并回读 →
@@ -395,7 +403,7 @@ roslaunch tcp_to_ros gcs_a_real.launch
 |---|---|---|
 | bridge 启动即退出：`无法根据 hostname/IP 解析本机 UAV 名称` | hostname ≠ `UAVn`，或不在 `topology.yaml` | 修正 hostname 为 `UAVn`；或 launch 显式传 `uav_name:=UAVn` |
 | 标定长期不 ready | `calibration_uavs` 成员未在线 / 已 armed / 采样不足 / 航向 > 30° | 查 `gcs_a_calibration` 逐机 ready 日志；确认计算集合成员全在线且 disarm、数据连续 2s |
-| GCS_A `rosservice list` 无 `/UAVn/uav_task` | 该机 bridge/executor 未起；ZMQ 端口被占 | 检查该机进程；确认 `14000`、`4200–4211` 未被旧进程占用；核对防火墙 |
+| GCS_A `rosservice list` 无 `/UAVn/uav_task` | 该机 bridge/executor 未起；ZMQ 端口被占 | 检查该机进程；确认 `14000`、bundle `4200`（legacy `4200–4210`）未被旧进程占用；核对防火墙 |
 | `39001` 无监听 / 连接被拒 | tcp_server 未起，或残留进程占用 | `ss -ltnp \| grep 39001`；清理残留后重启 GCS_A 入口 |
 | MAVROS 未 `connected` | 机载 MAVROS launch 的 `fcu_url` / `tgt_system` 与实际链路不符；串口权限 / 波特率 | 核对机载 MAVROS launch（`px4.launch`、现场 `px4_multi.launch`）的 `fcu_url`、`tgt_system` 与飞控一致；`ls -l /dev/ttyACM*`；用户加入 `dialout` 组 |
 | 整组 FAILURE 且机载有 `MIN_DISTANCE_BREACH` | 真实安全事件（物理接近 → 组级 BRAKE_HOLD） | 属被测行为：保留机载 rosout/ulog 证据，整体收口后重来 |
@@ -413,7 +421,7 @@ python3 references/runtime/task_test.py --backend tcp --group A --task prepare \
   --tcp-host 192.168.5.241 --tcp-port 39001 --timeout-s 180
 ```
 
-- 线上协议：JSON Lines over TCP（见 `references/docs/实物无人机上下层TCP-IP接口对接方案.md`）。
+- 线上协议：[JSON Lines over TCP](../../references/runtime/docs/实物无人机上下层TCP-IP接口对接方案.md)。
 - 实机 runtime 由上游负责人部署；本工作区仅提供 `tcp_to_ros` 服务端与上述联调脚本。
 
 ## 11. 命令速查

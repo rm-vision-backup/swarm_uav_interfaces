@@ -4,6 +4,7 @@ Group A 地面站与单机执行器共同依赖的纯 ROS `msg/srv` 契约包。
 
 > 实机部署与运行说明（机器/包清单、地址端口、构建、配置冻结、启动、运行流程、故障排查）见
 > [`real_setup.md`](real_setup.md)。
+> 日常上机按总工作区的 [实机测试工作流](../../verification/real_uav_workflow/README.md) 执行；本包文档用于查接口和部署细节。
 
 ## 契约
 
@@ -17,7 +18,7 @@ Group A 地面站与单机执行器共同依赖的纯 ROS `msg/srv` 契约包。
 ## 接口
 
 - `Pose3DYaw.msg`：位置与 yaw；坐标系和单位由部署配置冻结，消息不做隐式换算。
-- `TaskAssignment.msg`：单机任务分配；首版仅使用 `target_pose` 完成 `MOVE_TO`。
+- `TaskAssignment.msg`：单机任务分配，包含 `target_pose`、`waypoints`、`formation_follow`、`formation_offset`、`target_id` 等字段；按命令使用，具体支持范围由执行器决定。
 - `UavTaskState.msg`：机载接受与终态反馈。
 - `UavLinkHealth.msg`：GCS_A 发布的逐机端到端链路健康事件与快照；状态为 `DISCOVERED`、`HEALTHY`、`SUSPECT`、`LOST`、`RECOVERED`。
 - `UavTask.srv`：非阻塞单机任务接收入口。
